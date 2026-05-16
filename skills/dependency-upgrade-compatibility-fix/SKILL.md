@@ -1,5 +1,5 @@
 ---
-name: dependency-upgrade-compatibility-fix
+name: dependency-upgrade-candidate-check
 description: 仅通过静态代码和 SBOM 证据筛选最多 20 个关键依赖 PURL，并调用工具查询可升级状态
 ---
 
@@ -57,7 +57,7 @@ description: 仅通过静态代码和 SBOM 证据筛选最多 20 个关键依赖
 - 它是否在源码中被真实使用。
 - 它和安全风险或业务关键路径的关系。
 
-`reason` 应该是可审阅的中文短句，不要只写“版本旧”。
+选择理由应写在最终报告中，保持为可审阅的中文短句，不要只写“版本旧”。
 
 如果只能从 SBOM 看到依赖，但没有找到源码引用，应降低优先级，并在风险信号中体现它只是 SBOM 证据。
 

@@ -6,10 +6,13 @@ import type { ToolDef } from "../schema"
 
 const DEFAULT_CDXGEN_URL = "http://localhost:9090"
 const DEFAULT_TIMEOUT = 300_000
+const DEFAULT_CDXGEN_CONTAINER_WORKSPACES = "/workspace"
 
 export interface CreateSBOMGenerateToolInput {
   cdxgenUrl?: string
   timeout?: number
+  cdxgenHostWorkspaces?: string
+  cdxgenContainerWorkspaces?: string
 }
 
 const InputSchema = z.object({
@@ -44,9 +47,17 @@ export function createSBOMGenerateTool(input: CreateSBOMGenerateToolInput = {}):
 
       const type = isRemoteRepository ? "universal" : await inferCdxgenType(repositoryPath)
       const cdxgenUrl = normalizeBaseUrl(input.cdxgenUrl ?? process.env.CDXGEN_URL ?? DEFAULT_CDXGEN_URL)
+      const cdxgenRepository = isRemoteRepository
+        ? { path: repositoryPath, mapped: false, hostWorkspaces: undefined, containerWorkspaces: undefined }
+        : mapRepositoryPathForCdxgen({
+            repositoryPath,
+            workspace: ctx.workspace,
+            hostWorkspaces: input.cdxgenHostWorkspaces ?? process.env.CDXGEN_HOST_WORKSPACES,
+            containerWorkspaces: input.cdxgenContainerWorkspaces ?? process.env.CDXGEN_CONTAINER_WORKSPACES,
+          })
       const sbom = await requestSBOM({
         cdxgenUrl,
-        repository: repositoryPath,
+        repository: cdxgenRepository.path,
         type,
         timeout: input.timeout ?? Number(process.env.CDXGEN_TIMEOUT_MS ?? DEFAULT_TIMEOUT),
         isRemoteRepository,
@@ -60,6 +71,10 @@ export function createSBOMGenerateTool(input: CreateSBOMGenerateToolInput = {}):
         repositoryTarget: target,
         type,
         cdxgenUrl,
+        cdxgenRepositoryPath: cdxgenRepository.path,
+        cdxgenPathMapped: cdxgenRepository.mapped,
+        cdxgenHostWorkspaces: cdxgenRepository.hostWorkspaces,
+        cdxgenContainerWorkspaces: cdxgenRepository.containerWorkspaces,
         workspace: ctx.workspace,
         isRemoteRepository,
       })
@@ -70,6 +85,8 @@ export function createSBOMGenerateTool(input: CreateSBOMGenerateToolInput = {}):
           {
             cdxgenUrl,
             repositoryPath,
+            cdxgenRepositoryPath: cdxgenRepository.path,
+            cdxgenPathMapped: cdxgenRepository.mapped,
             type,
             artifacts,
             summary,
@@ -84,6 +101,10 @@ export function createSBOMGenerateTool(input: CreateSBOMGenerateToolInput = {}):
         metadata: {
           cdxgenUrl,
           repositoryPath,
+          cdxgenRepositoryPath: cdxgenRepository.path,
+          cdxgenPathMapped: cdxgenRepository.mapped,
+          cdxgenHostWorkspaces: cdxgenRepository.hostWorkspaces,
+          cdxgenContainerWorkspaces: cdxgenRepository.containerWorkspaces,
           type,
           sbomPath: artifacts.sbomPath,
           summaryPath: artifacts.summaryPath,
@@ -195,6 +216,10 @@ interface WriteSBOMArtifactsInput {
   repositoryTarget: string
   type: string
   cdxgenUrl: string
+  cdxgenRepositoryPath: string
+  cdxgenPathMapped: boolean
+  cdxgenHostWorkspaces?: string
+  cdxgenContainerWorkspaces?: string
   workspace: string
   isRemoteRepository: boolean
 }
@@ -210,6 +235,10 @@ async function writeSBOMArtifacts(input: WriteSBOMArtifactsInput) {
   await writeJSON(summaryPath, {
     generatedAt: new Date().toISOString(),
     repositoryPath: input.repositoryPath,
+    cdxgenRepositoryPath: input.cdxgenRepositoryPath,
+    cdxgenPathMapped: input.cdxgenPathMapped,
+    cdxgenHostWorkspaces: input.cdxgenHostWorkspaces,
+    cdxgenContainerWorkspaces: input.cdxgenContainerWorkspaces,
     type: input.type,
     cdxgenUrl: input.cdxgenUrl,
     sbomPath,
@@ -253,6 +282,56 @@ function sanitizeArtifactName(name: string) {
 
 function resolveRepositoryPath(repositoryPath: string, cwd: string) {
   return path.isAbsolute(repositoryPath) ? path.resolve(repositoryPath) : path.resolve(cwd, repositoryPath)
+}
+
+interface MapRepositoryPathForCdxgenInput {
+  repositoryPath: string
+  workspace: string
+  hostWorkspaces?: string
+  containerWorkspaces?: string
+}
+
+function mapRepositoryPathForCdxgen(input: MapRepositoryPathForCdxgenInput) {
+  const hostWorkspaces = path.resolve(input.hostWorkspaces?.trim() || inferWorkspaceRoot(input.workspace))
+  const containerWorkspaces = normalizeContainerRoot(
+    input.containerWorkspaces?.trim() || DEFAULT_CDXGEN_CONTAINER_WORKSPACES,
+  )
+  const relative = path.relative(hostWorkspaces, input.repositoryPath)
+  const isInsideHostWorkspaces = Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative)
+
+  if (!isInsideHostWorkspaces) {
+    return {
+      path: input.repositoryPath,
+      mapped: false,
+      hostWorkspaces,
+      containerWorkspaces,
+    }
+  }
+
+  return {
+    path: joinContainerPath(containerWorkspaces, relative),
+    mapped: true,
+    hostWorkspaces,
+    containerWorkspaces,
+  }
+}
+
+function inferWorkspaceRoot(workspace: string) {
+  return path.resolve(workspace, "..", "..")
+}
+
+function normalizeContainerRoot(containerRoot: string) {
+  const normalized = toPosixPath(containerRoot).replace(/\/+$/, "")
+  return normalized || DEFAULT_CDXGEN_CONTAINER_WORKSPACES
+}
+
+function joinContainerPath(containerRoot: string, relativePath: string) {
+  const relative = toPosixPath(relativePath).replace(/^\/+/, "")
+  return `${containerRoot}/${relative}`
+}
+
+function toPosixPath(value: string) {
+  return value.replace(/\\/g, "/")
 }
 
 function normalizeBaseUrl(url: string) {

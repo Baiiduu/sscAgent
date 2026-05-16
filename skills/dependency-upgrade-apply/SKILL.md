@@ -5,7 +5,7 @@ description: 根据升级检查结果修改 manifest 文件中的依赖版本，
 
 # 依赖升级执行
 
-当用户确认要执行依赖升级，或者上一阶段（candidate-check）已经给出升级建议后，使用本技能。
+当用户确认要执行依赖升级，或者上一阶段 `dependency-upgrade-candidate-check` 已经给出升级建议后，使用本技能。
 
 本技能只负责执行升级操作，不负责筛选候选依赖、不负责兼容性修复。
 
@@ -95,7 +95,7 @@ go build ./... 2>&1
 - 升级失败的依赖及失败原因。
 - lockfile 更新状态。
 - 构建验证结果（如果执行了）。
-- 剩余未解决的兼容性问题（引导到 `dependency-upgrade-compatibility-fix` 技能）。
+- 剩余未解决的兼容性问题，并说明需要单独进行源码兼容性修补。
 
 ## 安全约束
 
@@ -109,7 +109,7 @@ go build ./... 2>&1
 
 本技能不负责：
 
-- 筛选升级候选（那是 candidate-check 的工作）。
-- 修补 API 不兼容或代码层面的兼容性问题（那是 compatibility-fix 的工作）。
+- 筛选升级候选（那是 `dependency-upgrade-candidate-check` 的工作）。
+- 修补 API 不兼容或代码层面的兼容性问题。
 - 审查许可证变更、法律合规或其他非技术问题。
 - 部署、发布或 CI/CD 相关操作。

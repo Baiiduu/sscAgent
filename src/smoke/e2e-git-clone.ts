@@ -165,7 +165,7 @@ function createSmokeProviderRuntime() {
                     npm: "@ai-sdk/openai-compatible",
                   },
                   limit: {
-                    context: 64_000,
+                    context: 1_000_000,
                     output: 8_000,
                   },
                 },

@@ -37,6 +37,7 @@ export interface SessionRevert {
   partID?: string
   snapshotID?: string
   diff?: string
+  runBaselineHash?: string
 }
 
 export interface SessionSnapshot {

@@ -5,6 +5,7 @@ import type { SessionStore } from "./session"
 import { runAgentTurn } from "./turn"
 import type { HarnessSession } from "./session"
 import type { CreateSessionToolExecutorEvents, ToolExecutor } from "../tool"
+import type { SnapshotService } from "../snapshot"
 import { COMPACTION_SYSTEM_PROMPT, createCompactionMessage, estimateMessagesTokens, isOverflow, prepareCompaction } from "../context"
 import { generateAgentText } from "../llm-runtime"
 
@@ -26,6 +27,7 @@ export interface HarnessLoopInput extends Omit<HarnessRunInput, "messages"> {
   store: SessionStore
   toolExecutor?: ToolExecutor
   createToolExecutor?: (session: HarnessSession, events?: CreateSessionToolExecutorEvents) => ToolExecutor
+  snapshotService?: SnapshotService
   maxIterations?: number
   compaction?: {
     auto?: boolean
@@ -54,6 +56,16 @@ export async function runHarnessLoop(input: HarnessLoopInput): Promise<HarnessLo
           }),
       })
     if (!toolExecutor) return result
+
+    // 在工具执行前捕获工作区 baseline，用于 run 级别回滚
+    if (input.snapshotService) {
+      const hash = await input.snapshotService.track({ workspace: session.workspace })
+      if (hash) {
+        await input.store.update(input.sessionID, {
+          revert: { runBaselineHash: hash, messageID: "(run-start)" },
+        })
+      }
+    }
 
     for (const toolCall of result.toolCalls) {
       await executeToolCall(input, toolExecutor, result.message, toolCall)
