@@ -1,9 +1,8 @@
 import { toModelMessages } from "./model-message"
 import { createMessage, createPartID, type HarnessMessage } from "./message"
 import type { HarnessRunInput, HarnessResult } from "./schema"
-import type { SessionStore } from "./session"
+import type { HarnessSession, SessionRun, SessionStore } from "./session"
 import { runAgentTurn } from "./turn"
-import type { HarnessSession } from "./session"
 import type { CreateSessionToolExecutorEvents, ToolExecutor } from "../tool"
 import type { SnapshotService } from "../snapshot"
 import { COMPACTION_SYSTEM_PROMPT, createCompactionMessage, estimateMessagesTokens, isOverflow, prepareCompaction } from "../context"
@@ -38,41 +37,47 @@ export interface HarnessLoopInput extends Omit<HarnessRunInput, "messages"> {
 
 export async function runHarnessLoop(input: HarnessLoopInput): Promise<HarnessLoopResult> {
   const maxIterations = input.maxIterations ?? 10
-  for (let iteration = 0; iteration < maxIterations; iteration++) {
-    const result = await runHarnessIteration(input)
-    if (result.type === "completed") return result
-    const session = await input.store.get(input.sessionID)
-    if (!session) throw new Error(`Session not found: ${input.sessionID}`)
+  const run = await beginSessionRun(input)
 
-    const toolExecutor =
-      input.toolExecutor ??
-      input.createToolExecutor?.(session, {
-        onMetadata: (metadata) =>
-          input.onEvent?.({
-            type: "tool-metadata",
-            toolCallID: metadata.toolCallID,
-            title: metadata.title,
-            metadata: metadata.metadata,
-          }),
-      })
-    if (!toolExecutor) return result
+  try {
+    for (let iteration = 0; iteration < maxIterations; iteration++) {
+      const result = await runHarnessIteration(input, run)
+      if (result.type === "completed") {
+        await completeSessionRun(input, run, "completed")
+        return result
+      }
 
-    // 在工具执行前捕获工作区 baseline，用于 run 级别回滚
-    if (input.snapshotService) {
-      const hash = await input.snapshotService.track({ workspace: session.workspace })
-      if (hash) {
-        await input.store.update(input.sessionID, {
-          revert: { runBaselineHash: hash, messageID: "(run-start)" },
+      const session = await input.store.get(input.sessionID)
+      if (!session) throw new Error(`Session not found: ${input.sessionID}`)
+
+      const toolExecutor =
+        input.toolExecutor ??
+        input.createToolExecutor?.(session, {
+          runID: run?.id,
+          onMetadata: (metadata) =>
+            input.onEvent?.({
+              type: "tool-metadata",
+              toolCallID: metadata.toolCallID,
+              title: metadata.title,
+              metadata: metadata.metadata,
+            }),
         })
+
+      if (!toolExecutor) {
+        await completeSessionRun(input, run, "completed")
+        return result
+      }
+
+      for (const toolCall of result.toolCalls) {
+        await executeToolCall(input, toolExecutor, result.message, toolCall, run)
       }
     }
 
-    for (const toolCall of result.toolCalls) {
-      await executeToolCall(input, toolExecutor, result.message, toolCall)
-    }
+    throw new Error(`Harness loop exceeded max iterations (${maxIterations})`)
+  } catch (error) {
+    await completeSessionRun(input, run, "failed", errorMessage(error))
+    throw error
   }
-
-  throw new Error(`Harness loop exceeded max iterations (${maxIterations})`)
 }
 
 async function executeToolCall(
@@ -80,6 +85,7 @@ async function executeToolCall(
   toolExecutor: ToolExecutor,
   assistant: HarnessMessage,
   toolCall: Extract<HarnessMessage["parts"][number], { type: "tool-call" }>,
+  run?: SessionRun,
 ) {
   try {
     const output = await toolExecutor.execute({
@@ -90,8 +96,7 @@ async function executeToolCall(
       input: toolCall.input,
     })
 
-    await input.store.appendMessage(
-      input.sessionID,
+    const message = attachRunID(
       createMessage({
         sessionID: input.sessionID,
         role: "tool",
@@ -107,7 +112,10 @@ async function executeToolCall(
           },
         ],
       }),
+      run?.id,
     )
+    await input.store.appendMessage(input.sessionID, message)
+    await recordRunMessage(input, run, message.id)
 
     await input.onEvent?.({
       type: "tool-result",
@@ -118,8 +126,7 @@ async function executeToolCall(
     })
     return
   } catch (error) {
-    await input.store.appendMessage(
-      input.sessionID,
+    const message = attachRunID(
       createMessage({
         sessionID: input.sessionID,
         role: "tool",
@@ -136,7 +143,10 @@ async function executeToolCall(
           },
         ],
       }),
+      run?.id,
     )
+    await input.store.appendMessage(input.sessionID, message)
+    await recordRunMessage(input, run, message.id)
 
     await input.onEvent?.({
       type: "tool-error",
@@ -147,13 +157,16 @@ async function executeToolCall(
   }
 }
 
-async function runHarnessIteration(input: HarnessLoopInput): Promise<HarnessLoopResult> {
+async function runHarnessIteration(input: HarnessLoopInput, run?: SessionRun): Promise<HarnessLoopResult> {
   await compactSessionIfNeeded(input)
   const history = await input.store.messages(input.sessionID)
-  const assistant = createMessage({
-    sessionID: input.sessionID,
-    role: "assistant",
-  })
+  const assistant = attachRunID(
+    createMessage({
+      sessionID: input.sessionID,
+      role: "assistant",
+    }),
+    run?.id,
+  )
 
   const result = await runAgentTurn({
     ...input,
@@ -197,6 +210,7 @@ async function runHarnessIteration(input: HarnessLoopInput): Promise<HarnessLoop
   assistant.finishReason = result.finishReason
   assistant.time.completed = assistant.time.completed ?? Date.now()
   await input.store.appendMessage(input.sessionID, assistant)
+  await recordRunMessage(input, run, assistant.id)
 
   const toolCalls = assistant.parts.filter(
     (part): part is Extract<HarnessMessage["parts"][number], { type: "tool-call" }> => part.type === "tool-call",
@@ -216,6 +230,51 @@ async function runHarnessIteration(input: HarnessLoopInput): Promise<HarnessLoop
     message: assistant,
     result,
   }
+}
+
+async function beginSessionRun(input: HarnessLoopInput) {
+  if (!input.store.appendRun) return
+
+  const session = await input.store.get(input.sessionID)
+  if (!session) throw new Error(`Session not found: ${input.sessionID}`)
+
+  const baselineHash = await input.snapshotService?.track({ workspace: session.workspace })
+  return input.store.appendRun({
+    sessionID: input.sessionID,
+    status: "running",
+    baselineHash,
+  })
+}
+
+async function completeSessionRun(
+  input: HarnessLoopInput,
+  run: SessionRun | undefined,
+  status: "completed" | "failed",
+  error?: string,
+) {
+  if (!run || !input.store.updateRun) return
+  await input.store.updateRun(input.sessionID, run.id, {
+    status,
+    error: error ?? null,
+    time: {
+      completed: Date.now(),
+    },
+  })
+}
+
+async function recordRunMessage(input: HarnessLoopInput, run: SessionRun | undefined, messageID: string) {
+  if (!run || !input.store.updateRun) return
+  await input.store.updateRun(input.sessionID, run.id, {
+    firstMessageID: run.firstMessageID ?? messageID,
+    lastMessageID: messageID,
+  })
+  run.firstMessageID = run.firstMessageID ?? messageID
+  run.lastMessageID = messageID
+}
+
+function attachRunID<T extends HarnessMessage>(message: T, runID: string | undefined): T {
+  if (!runID) return message
+  return Object.assign(message, { runID })
 }
 
 function errorMessage(error: unknown) {

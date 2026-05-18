@@ -1,130 +1,169 @@
-import type { HarnessSession, SessionSnapshot, SessionStore } from "../harness/session"
+import path from "node:path"
+import type { HarnessMessage } from "../harness/message"
+import type { SessionRun, SessionSnapshot, SessionStore } from "../harness/session"
+import type { SnapshotPatch, SnapshotService } from "../snapshot"
 
 export interface RevertSessionSnapshotInput {
   store: SessionStore
   sessionID: string
-  snapshotID?: string
+  snapshotService?: SnapshotService
+  runID?: string
 }
 
 export interface RevertSessionSnapshotResult {
   snapshot: SessionSnapshot | { id: string; cwd: string }
   output: string
+  runID?: string
 }
 
-export async function revertSessionSnapshot(
-  input: RevertSessionSnapshotInput,
-): Promise<RevertSessionSnapshotResult> {
+export interface UnrevertSessionInput {
+  store: SessionStore
+  sessionID: string
+  snapshotService: SnapshotService
+}
+
+export async function revertSessionSnapshot(input: RevertSessionSnapshotInput): Promise<RevertSessionSnapshotResult> {
+  const session = await input.store.get(input.sessionID)
+  if (!session) throw new Error(`Session not found: ${input.sessionID}`)
+  if (!input.snapshotService) throw new Error("Snapshot service is required for run revert")
+  if (!input.store.runs || !input.store.updateRun) throw new Error("Session store does not support runs")
+
+  const run = await selectRun(input.store, input.sessionID, input.runID)
+  if (!run) throw new Error(`No completed run found for session: ${input.sessionID}`)
+  return revertSessionRun({ ...input, run, snapshotService: input.snapshotService })
+}
+
+export async function unrevertSession(input: UnrevertSessionInput) {
+  const session = await input.store.get(input.sessionID)
+  if (!session) throw new Error(`Session not found: ${input.sessionID}`)
+  if (!session.revert) return session
+  if (!session.revert.snapshot) return session
+  if (!input.snapshotService.restore) throw new Error("Snapshot service does not support restore")
+
+  await input.snapshotService.restore({
+    workspace: session.workspace,
+    hash: session.revert.snapshot,
+  })
+
+  if (session.revert.runID && input.store.updateRun) {
+    await input.store.updateRun(session.id, session.revert.runID, {
+      status: "completed",
+      restoreHash: undefined,
+      time: {
+        reverted: undefined,
+      },
+    })
+  }
+
+  return input.store.update(session.id, {
+    revert: null,
+    summary: null,
+  })
+}
+
+export async function cleanupRevertedSession(input: { store: SessionStore; sessionID: string }) {
+  const session = await input.store.get(input.sessionID)
+  if (!session) throw new Error(`Session not found: ${input.sessionID}`)
+  if (!session.revert) return session
+
+  if (session.revert.cleanup === "run" && session.revert.runID) {
+    const messages = await input.store.messages(session.id)
+    await input.store.replaceMessages(
+      session.id,
+      messages.filter((message) => runIDOf(message) !== session.revert?.runID),
+    )
+  }
+
+  return input.store.update(session.id, {
+    revert: null,
+    summary: null,
+  })
+}
+
+async function revertSessionRun(input: RevertSessionSnapshotInput & { run: SessionRun; snapshotService: SnapshotService }) {
   const session = await input.store.get(input.sessionID)
   if (!session) throw new Error(`Session not found: ${input.sessionID}`)
 
-  // 优先使用 run 级别 baseline 回滚
-  if (session.revert?.runBaselineHash) {
-    return revertRunBaseline(session, input.store)
+  const restoreHash = await input.snapshotService.track({ workspace: session.workspace })
+  const snapshots = (await input.store.snapshots(session.id)).filter((snapshot) => snapshot.runID === input.run.id)
+  const patches = patchesFromSnapshots(snapshots)
+  const diff = snapshots.map((snapshot) => snapshot.diff).filter(Boolean).join("\n\n")
+
+  if (patches.length > 0) {
+    if (!input.snapshotService.revert) throw new Error("Snapshot service does not support revert")
+    await input.snapshotService.revert({
+      workspace: session.workspace,
+      patches,
+    })
   }
 
-  // 回退到 per-tool snapshot 回滚
-  return revertPerToolSnapshot(session, input.store, input.snapshotID)
-}
+  await input.store.updateRun?.(session.id, input.run.id, {
+    status: "reverted",
+    restoreHash,
+    time: {
+      reverted: Date.now(),
+    },
+  })
 
-async function revertRunBaseline(
-  session: HarnessSession,
-  store: SessionStore,
-): Promise<RevertSessionSnapshotResult> {
-  const baselineHash = session.revert!.runBaselineHash!
-  const cwd = session.cwd || session.workspace
-
-  const output = await applyBaselineDiff(cwd, baselineHash)
-
-  await store.update(session.id, {
-    revert: null,
-    summary: null,
+  const summary = summarizeSnapshots(snapshots)
+  await input.store.update(session.id, {
+    revert: {
+      messageID: input.run.firstMessageID ?? "",
+      runID: input.run.id,
+      snapshot: restoreHash,
+      diff,
+      cleanup: "run",
+    },
+    summary,
   })
 
   return {
-    snapshot: { id: baselineHash, cwd },
-    output,
+    snapshot: { id: restoreHash ?? input.run.baselineHash ?? input.run.id, cwd: session.workspace },
+    output: patches.length > 0 ? `Reverted run ${input.run.id}.` : `Run ${input.run.id} had no file changes to revert.`,
+    runID: input.run.id,
   }
 }
 
-async function revertPerToolSnapshot(
-  session: HarnessSession,
-  store: SessionStore,
-  snapshotID?: string,
-): Promise<RevertSessionSnapshotResult> {
-  const snapshots = await store.snapshots(session.id)
-  const sid = snapshotID ?? session.revert?.snapshotID
-  const snapshot = sid ? snapshots.find((item) => item.id === sid) : snapshots.at(-1)
-  if (!snapshot) {
-    throw new Error(
-      sid ? `Snapshot not found: ${sid}` : `No snapshots found for session: ${session.id}`,
-    )
-  }
-  if (!snapshot.diff) throw new Error(`Snapshot has no diff to revert: ${snapshot.id}`)
-
-  const output = await applyReversePatch(snapshot.cwd, snapshot.diff)
-
-  await store.update(session.id, {
-    revert: null,
-    summary: null,
-  })
-
-  return { snapshot, output }
-}
-
-async function applyBaselineDiff(cwd: string, baselineHash: string) {
-  // 1. 暂存当前所有变更
-  await git(cwd, ["add", "--all", "--", "."])
-
-  // 2. 获取 baseline 到当前状态的完整 diff
-  const diff = await git(cwd, ["diff", "--binary", baselineHash, "HEAD"])
-
-  if (!diff) {
-    return "No changes to revert — working tree matches baseline."
+async function selectRun(store: SessionStore, sessionID: string, runID?: string) {
+  if (runID) {
+    const run = await store.getRun?.(sessionID, runID)
+    if (!run) throw new Error(`Session run not found: ${runID}`)
+    return run
   }
 
-  // 3. 反向应用 diff 恢复 baseline
-  const output = await applyReversePatch(cwd, diff)
-
-  // 4. 重置暂存区
-  await git(cwd, ["reset", "HEAD", "."])
-
-  return output
+  const runs = await store.runs?.(sessionID)
+  return runs
+    ?.filter((run) => run.status === "completed")
+    .sort((a, b) => a.time.created - b.time.created)
+    .at(-1)
 }
 
-async function applyReversePatch(cwd: string, diff: string) {
-  const proc = Bun.spawn(["git", "apply", "-R", "--whitespace=nowarn"], {
-    cwd,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  proc.stdin.write(diff)
-  proc.stdin.end()
-
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-
-  if (exitCode !== 0) {
-    throw new Error(stderr.trim() || stdout.trim() || `git apply -R failed with exit code ${exitCode}`)
+function patchesFromSnapshots(snapshots: SessionSnapshot[]): SnapshotPatch[] {
+  const patches = new Map<string, Set<string>>()
+  for (const snapshot of snapshots) {
+    if (!snapshot.fromHash) continue
+    const files = patches.get(snapshot.fromHash) ?? new Set<string>()
+    for (const diff of snapshot.diffs) {
+      files.add(path.join(snapshot.cwd, diff.file).replaceAll("\\", "/"))
+    }
+    patches.set(snapshot.fromHash, files)
   }
-
-  return [stdout.trim(), stderr.trim()].filter(Boolean).join("\n")
+  return [...patches.entries()].map(([hash, files]) => ({
+    hash,
+    files: [...files],
+  }))
 }
 
-async function git(cwd: string, args: string[]) {
-  const proc = Bun.spawn(["git", "-c", "core.longpaths=true", ...args], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  if (exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${stderr.trim() || stdout.trim()}`)
-  return stdout.trim()
+function summarizeSnapshots(snapshots: SessionSnapshot[]) {
+  const diffs = snapshots.flatMap((snapshot) => snapshot.diffs)
+  return {
+    text: `Changed ${diffs.length} file(s).`,
+    additions: diffs.reduce((sum, item) => sum + item.additions, 0),
+    deletions: diffs.reduce((sum, item) => sum + item.deletions, 0),
+    files: new Set(diffs.map((item) => item.file)).size,
+  }
+}
+
+function runIDOf(message: HarnessMessage) {
+  return (message as HarnessMessage & { runID?: string }).runID
 }

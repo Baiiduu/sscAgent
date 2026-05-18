@@ -5,8 +5,10 @@ import { createMessage, type HarnessMessage, type MessagePart, type MessageRole 
 import type {
   CreateSessionInput,
   HarnessSession,
+  SessionRun,
   SessionSnapshot,
   SessionStore,
+  UpdateSessionRunPatch,
   UpdateSessionPatch,
 } from "../harness/session"
 import type { SnapshotFileDiff } from "../snapshot"
@@ -40,6 +42,7 @@ interface SessionRow {
 interface MessageRow {
   id: string
   session_id: string
+  run_id: string | null
   role: MessageRole
   parent_id: string | null
   finish_reason: string | null
@@ -65,9 +68,26 @@ interface PartRow {
   time_completed: number | null
 }
 
+interface RunRow {
+  id: string
+  session_id: string
+  status: SessionRun["status"]
+  baseline_hash: string | null
+  restore_hash: string | null
+  first_message_id: string | null
+  last_message_id: string | null
+  summary_json: string | null
+  error: string | null
+  time_created: number
+  time_updated: number
+  time_completed: number | null
+  time_reverted: number | null
+}
+
 interface SnapshotRow {
   id: string
   session_id: string
+  run_id: string | null
   message_id: string | null
   part_id: string | null
   tool_call_id: string | null
@@ -85,6 +105,7 @@ export class SQLiteSessionStore implements SessionStore {
   constructor(private readonly input: SQLiteSessionStoreInput) {
     mkdirSync(dirname(input.filepath), { recursive: true })
     this.db = new Database(input.filepath)
+    this.migrate()
     this.db.exec(SQLITE_SESSION_SCHEMA)
   }
 
@@ -173,7 +194,8 @@ export class SQLiteSessionStore implements SessionStore {
       partMap.set(part.messageID ?? "", [...(partMap.get(part.messageID ?? "") ?? []), part])
     }
     return messages.map((message) =>
-      createMessage({
+      attachRunID(
+        createMessage({
         id: message.id,
         sessionID: message.session_id,
         role: message.role,
@@ -184,7 +206,9 @@ export class SQLiteSessionStore implements SessionStore {
           completed: message.time_completed ?? undefined,
         },
         finishReason: message.finish_reason ?? undefined,
-      }),
+        }),
+        message.run_id ?? undefined,
+      ),
     )
   }
 
@@ -202,8 +226,9 @@ export class SQLiteSessionStore implements SessionStore {
     this.db.transaction(() => {
       this.db
         .query(
-          `UPDATE message SET
+        `UPDATE message SET
             role = $role,
+            run_id = $run_id,
             parent_id = $parent_id,
             finish_reason = $finish_reason,
             time_created = $time_created,
@@ -256,6 +281,68 @@ export class SQLiteSessionStore implements SessionStore {
     await this.touch(sessionID)
   }
 
+  async runs(sessionID: string) {
+    return (
+      this.db.query("SELECT * FROM run WHERE session_id = ? ORDER BY time_created ASC, id ASC").all(sessionID) as RunRow[]
+    ).map(runFromRow)
+  }
+
+  async getRun(sessionID: string, runID: string) {
+    const row = this.db.query("SELECT * FROM run WHERE session_id = ? AND id = ?").get(sessionID, runID) as RunRow | null
+    if (!row) return
+    return runFromRow(row)
+  }
+
+  async appendRun(input: Omit<SessionRun, "id" | "time"> & { id?: string; time?: SessionRun["time"] }) {
+    const now = Date.now()
+    const run: SessionRun = {
+      ...input,
+      id: input.id ?? createID("run"),
+      time: input.time ?? {
+        created: now,
+        updated: now,
+      },
+    }
+    this.db
+      .query(
+        `INSERT INTO run (
+          id, session_id, status, baseline_hash, restore_hash, first_message_id, last_message_id,
+          summary_json, error, time_created, time_updated, time_completed, time_reverted
+        ) VALUES (
+          $id, $session_id, $status, $baseline_hash, $restore_hash, $first_message_id, $last_message_id,
+          $summary_json, $error, $time_created, $time_updated, $time_completed, $time_reverted
+        )`,
+      )
+      .run(runParams(run))
+    await this.touch(run.sessionID)
+    return run
+  }
+
+  async updateRun(sessionID: string, runID: string, patch: UpdateSessionRunPatch) {
+    const current = await this.getRun(sessionID, runID)
+    if (!current) throw new Error(`Session run not found: ${runID}`)
+    const next = applySessionRunPatch(current, patch)
+    this.db
+      .query(
+        `UPDATE run SET
+          status = $status,
+          baseline_hash = $baseline_hash,
+          restore_hash = $restore_hash,
+          first_message_id = $first_message_id,
+          last_message_id = $last_message_id,
+          summary_json = $summary_json,
+          error = $error,
+          time_created = $time_created,
+          time_updated = $time_updated,
+          time_completed = $time_completed,
+          time_reverted = $time_reverted
+        WHERE id = $id AND session_id = $session_id`,
+      )
+      .run(runParams(next))
+    await this.touch(sessionID)
+    return next
+  }
+
   async snapshots(sessionID: string) {
     return (
       this.db.query("SELECT * FROM snapshot WHERE session_id = ? ORDER BY time_created ASC, id ASC").all(sessionID) as SnapshotRow[]
@@ -273,14 +360,15 @@ export class SQLiteSessionStore implements SessionStore {
     this.db
       .query(
         `INSERT INTO snapshot (
-          id, session_id, message_id, part_id, tool_call_id, cwd, from_hash, to_hash, diffs_json, diff, time_created
+          id, session_id, run_id, message_id, part_id, tool_call_id, cwd, from_hash, to_hash, diffs_json, diff, time_created
         ) VALUES (
-          $id, $session_id, $message_id, $part_id, $tool_call_id, $cwd, $from_hash, $to_hash, $diffs_json, $diff, $time_created
+          $id, $session_id, $run_id, $message_id, $part_id, $tool_call_id, $cwd, $from_hash, $to_hash, $diffs_json, $diff, $time_created
         )`,
       )
       .run({
         $id: snapshot.id,
         $session_id: snapshot.sessionID,
+        $run_id: snapshot.runID ?? null,
         $message_id: snapshot.messageID ?? null,
         $part_id: snapshot.partID ?? null,
         $tool_call_id: snapshot.toolCallID ?? null,
@@ -293,6 +381,19 @@ export class SQLiteSessionStore implements SessionStore {
       })
     await this.touch(snapshot.sessionID)
     return snapshot
+  }
+
+  private migrate() {
+    this.addColumnIfMissing("message", "run_id", "TEXT")
+    this.addColumnIfMissing("snapshot", "run_id", "TEXT")
+  }
+
+  private addColumnIfMissing(table: string, column: string, definition: string) {
+    const exists = this.db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)
+    if (!exists) return
+    const columns = this.db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+    if (columns.some((item) => item.name === column)) return
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
   }
 
   private insertSession(session: HarnessSession) {
@@ -315,9 +416,9 @@ export class SQLiteSessionStore implements SessionStore {
     this.db
       .query(
         `INSERT INTO message (
-          id, session_id, role, parent_id, finish_reason, time_created, time_completed
+          id, session_id, run_id, role, parent_id, finish_reason, time_created, time_completed
         ) VALUES (
-          $id, $session_id, $role, $parent_id, $finish_reason, $time_created, $time_completed
+          $id, $session_id, $run_id, $role, $parent_id, $finish_reason, $time_created, $time_completed
         )`,
       )
       .run(messageParams(message))
@@ -366,11 +467,30 @@ function messageParams(message: HarnessMessage) {
   return {
     $id: message.id,
     $session_id: message.sessionID,
+    $run_id: runIDOf(message) ?? null,
     $role: message.role,
     $parent_id: message.parentID ?? null,
     $finish_reason: message.finishReason ?? null,
     $time_created: message.time.created,
     $time_completed: message.time.completed ?? null,
+  }
+}
+
+function runParams(run: SessionRun) {
+  return {
+    $id: run.id,
+    $session_id: run.sessionID,
+    $status: run.status,
+    $baseline_hash: run.baselineHash ?? null,
+    $restore_hash: run.restoreHash ?? null,
+    $first_message_id: run.firstMessageID ?? null,
+    $last_message_id: run.lastMessageID ?? null,
+    $summary_json: toJSON(run.summary),
+    $error: run.error ?? null,
+    $time_created: run.time.created,
+    $time_updated: run.time.updated,
+    $time_completed: run.time.completed ?? null,
+    $time_reverted: run.time.reverted ?? null,
   }
 }
 
@@ -417,6 +537,26 @@ function sessionFromRow(row: SessionRow): HarnessSession {
       updated: row.time_updated,
       compacting: row.time_compacting ?? undefined,
       archived: row.time_archived ?? undefined,
+    },
+  }
+}
+
+function runFromRow(row: RunRow): SessionRun {
+  return {
+    id: row.id,
+    sessionID: row.session_id,
+    status: row.status,
+    baselineHash: row.baseline_hash ?? undefined,
+    restoreHash: row.restore_hash ?? undefined,
+    firstMessageID: row.first_message_id ?? undefined,
+    lastMessageID: row.last_message_id ?? undefined,
+    summary: fromJSON(row.summary_json),
+    error: row.error ?? undefined,
+    time: {
+      created: row.time_created,
+      updated: row.time_updated,
+      completed: row.time_completed ?? undefined,
+      reverted: row.time_reverted ?? undefined,
     },
   }
 }
@@ -478,6 +618,7 @@ function snapshotFromRow(row: SnapshotRow): SessionSnapshot {
   return {
     id: row.id,
     sessionID: row.session_id,
+    runID: row.run_id ?? undefined,
     messageID: row.message_id ?? undefined,
     partID: row.part_id ?? undefined,
     toolCallID: row.tool_call_id ?? undefined,
@@ -493,11 +634,23 @@ function snapshotFromRow(row: SnapshotRow): SessionSnapshot {
 }
 
 function normalizeMessage(sessionID: string, message: HarnessMessage): HarnessMessage {
-  return createMessage({
-    ...message,
-    sessionID,
-    parts: message.parts.map((part) => normalizePart(sessionID, message.id, part)),
-  })
+  return attachRunID(
+    createMessage({
+      ...message,
+      sessionID,
+      parts: message.parts.map((part) => normalizePart(sessionID, message.id, part)),
+    }),
+    runIDOf(message),
+  )
+}
+
+function attachRunID(message: HarnessMessage, runID: string | undefined): HarnessMessage {
+  if (!runID) return message
+  return Object.assign(message, { runID })
+}
+
+function runIDOf(message: HarnessMessage) {
+  return (message as HarnessMessage & { runID?: string }).runID
 }
 
 function normalizePart(sessionID: string, messageID: string, part: MessagePart): MessagePart {
@@ -528,6 +681,24 @@ function applySessionPatch(session: HarnessSession, patch: UpdateSessionPatch): 
     ...(patch.revert !== undefined && { revert: patch.revert ?? undefined }),
     time: {
       ...session.time,
+      ...patch.time,
+      updated: patch.time?.updated ?? Date.now(),
+    },
+  }
+}
+
+function applySessionRunPatch(run: SessionRun, patch: UpdateSessionRunPatch): SessionRun {
+  return {
+    ...run,
+    ...(patch.status !== undefined && { status: patch.status }),
+    ...(patch.baselineHash !== undefined && { baselineHash: patch.baselineHash }),
+    ...(patch.restoreHash !== undefined && { restoreHash: patch.restoreHash }),
+    ...(patch.firstMessageID !== undefined && { firstMessageID: patch.firstMessageID }),
+    ...(patch.lastMessageID !== undefined && { lastMessageID: patch.lastMessageID }),
+    ...(patch.summary !== undefined && { summary: patch.summary ?? undefined }),
+    ...(patch.error !== undefined && { error: patch.error ?? undefined }),
+    time: {
+      ...run.time,
       ...patch.time,
       updated: patch.time?.updated ?? Date.now(),
     },

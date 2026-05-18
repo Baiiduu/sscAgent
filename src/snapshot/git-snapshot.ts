@@ -1,7 +1,16 @@
 import { createHash } from "node:crypto"
-import { mkdir } from "node:fs/promises"
+import { mkdir, rm } from "node:fs/promises"
 import path from "node:path"
-import type { SnapshotDiffInput, SnapshotFileDiff, SnapshotService, SnapshotTrackInput } from "./schema"
+import type {
+  SnapshotDiffInput,
+  SnapshotFileDiff,
+  SnapshotPatch,
+  SnapshotRestoreInput,
+  SnapshotRevertInput,
+  SnapshotService,
+  SnapshotSinceInput,
+  SnapshotTrackInput,
+} from "./schema"
 
 const DEFAULT_SNAPSHOT_ROOT = path.resolve(import.meta.dir, "../../.snapshots")
 const DEFAULT_EXCLUDES = [".git", ".workspaces", ".snapshots", ".tmp", "node_modules", "dist", "build", "__pycache__"]
@@ -23,6 +32,61 @@ class GitSnapshotService implements SnapshotService {
     await this.ensureInitialized(state)
     await this.git(state, ["add", "--all", "--", "."])
     return this.git(state, ["write-tree"])
+  }
+
+  async patch(input: SnapshotSinceInput): Promise<SnapshotPatch> {
+    const state = await this.state(input.workspace)
+    await this.ensureInitialized(state)
+    await this.stageChanges(state)
+    const output = await this.git(state, ["diff", "--cached", "--name-only", "-z", input.hash])
+    const files = output
+      .split("\0")
+      .filter(Boolean)
+      .map((file) => path.join(state.worktree, file).replaceAll("\\", "/"))
+    return {
+      hash: input.hash,
+      files,
+    }
+  }
+
+  async restore(input: SnapshotRestoreInput) {
+    const state = await this.state(input.workspace)
+    await this.ensureInitialized(state)
+    await this.git(state, ["read-tree", input.hash])
+    await this.git(state, ["checkout-index", "-a", "-f"])
+  }
+
+  async revert(input: SnapshotRevertInput) {
+    const state = await this.state(input.workspace)
+    await this.ensureInitialized(state)
+
+    const ops: Array<{ hash: string; file: string; rel: string }> = []
+    const seen = new Set<string>()
+    for (const patch of input.patches) {
+      for (const file of patch.files) {
+        const rel = path.relative(state.worktree, file).replaceAll("\\", "/")
+        if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || seen.has(rel)) continue
+        seen.add(rel)
+        ops.push({ hash: patch.hash, file, rel })
+      }
+    }
+
+    for (const op of ops) {
+      const tree = await this.git(state, ["ls-tree", op.hash, "--", op.rel])
+      if (tree.trim()) {
+        await this.git(state, ["checkout", op.hash, "--", op.rel])
+        continue
+      }
+      await rm(path.join(state.worktree, op.rel), { force: true, recursive: true })
+      await this.git(state, ["rm", "--cached", "-f", "--ignore-unmatch", "--", op.rel])
+    }
+  }
+
+  async diff(input: SnapshotSinceInput) {
+    const state = await this.state(input.workspace)
+    await this.ensureInitialized(state)
+    await this.stageChanges(state)
+    return this.git(state, ["diff", "--cached", "--patch", "--binary", input.hash])
   }
 
   async diffFull(input: SnapshotDiffInput) {
@@ -55,6 +119,10 @@ class GitSnapshotService implements SnapshotService {
     await mkdir(state.worktree, { recursive: true })
     await this.raw(["init", "--bare", state.gitdir])
     await this.writeExclude(state)
+  }
+
+  private async stageChanges(state: { worktree: string; gitdir: string }) {
+    await this.git(state, ["add", "--all", "--", "."])
   }
 
   private async writeExclude(state: { gitdir: string }) {

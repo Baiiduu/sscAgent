@@ -19,6 +19,7 @@ export interface ToolMetadataEvent {
 
 export interface CreateSessionToolExecutorEvents {
   onMetadata?: (input: ToolMetadataEvent) => void | Promise<void>
+  runID?: string
 }
 
 export interface CreateToolExecutorInput {
@@ -32,6 +33,7 @@ export interface CreateToolExecutorInput {
   onMetadata?: (input: ToolMetadataEvent) => void | Promise<void>
   snapshot?: {
     sessionID: string
+    runID?: string
     store: SessionStore
     service: SnapshotService
     tools?: string[]
@@ -94,6 +96,7 @@ export function createSessionToolExecutor(input: CreateSessionToolExecutorInput)
         ? {
             ...input.snapshot,
             sessionID: session.id,
+            runID: events?.runID,
           }
         : undefined,
       onMetadata: async (metadata) => {
@@ -133,6 +136,7 @@ async function appendSnapshotIfChanged(
   const snapshot = await input.snapshot.store.appendSnapshot(
     {
       sessionID: input.snapshot.sessionID,
+      runID: input.snapshot.runID,
       cwd: input.cwd,
       messageID: request.messageID,
       partID: request.partID,
@@ -150,12 +154,6 @@ async function appendSnapshotIfChanged(
       additions: snapshot.diffs.reduce((sum, item) => sum + item.additions, 0),
       deletions: snapshot.diffs.reduce((sum, item) => sum + item.deletions, 0),
       files: snapshot.diffs.length,
-    },
-    revert: {
-      messageID: request.messageID ?? "",
-      partID: request.partID,
-      snapshotID: snapshot.id,
-      diff: snapshot.diff,
     },
   })
 }

@@ -36,13 +36,37 @@ export interface SessionRevert {
   messageID: string
   partID?: string
   snapshotID?: string
+  runID?: string
+  snapshot?: string
   diff?: string
+  cleanup?: "run" | "message"
   runBaselineHash?: string
+}
+
+export type SessionRunStatus = "running" | "completed" | "failed" | "reverted"
+
+export interface SessionRun {
+  id: string
+  sessionID: string
+  status: SessionRunStatus
+  baselineHash?: string
+  restoreHash?: string
+  firstMessageID?: string
+  lastMessageID?: string
+  summary?: SessionSummary
+  error?: string
+  time: {
+    created: number
+    updated: number
+    completed?: number
+    reverted?: number
+  }
 }
 
 export interface SessionSnapshot {
   id: string
   sessionID: string
+  runID?: string
   messageID?: string
   partID?: string
   toolCallID?: string
@@ -100,13 +124,29 @@ export interface SessionStore {
   replaceMessages(sessionID: string, messages: HarnessMessage[]): Promise<void>
   appendPart(sessionID: string, messageID: string, part: HarnessMessage["parts"][number]): Promise<void>
   updatePart(sessionID: string, messageID: string, part: HarnessMessage["parts"][number]): Promise<void>
+  runs?(sessionID: string): Promise<SessionRun[]>
+  getRun?(sessionID: string, runID: string): Promise<SessionRun | undefined>
+  appendRun?(run: Omit<SessionRun, "id" | "time"> & { id?: string; time?: SessionRun["time"] }): Promise<SessionRun>
+  updateRun?(sessionID: string, runID: string, patch: UpdateSessionRunPatch): Promise<SessionRun>
   snapshots(sessionID: string): Promise<SessionSnapshot[]>
   appendSnapshot(snapshot: Omit<SessionSnapshot, "id" | "time"> & { id?: string; time?: SessionSnapshot["time"] }): Promise<SessionSnapshot>
+}
+
+export interface UpdateSessionRunPatch {
+  status?: SessionRunStatus
+  baselineHash?: string
+  restoreHash?: string
+  firstMessageID?: string
+  lastMessageID?: string
+  summary?: SessionSummary | null
+  error?: string | null
+  time?: Partial<SessionRun["time"]>
 }
 
 export class MemorySessionStore implements SessionStore {
   private readonly sessions = new Map<string, HarnessSession>()
   private readonly history = new Map<string, HarnessMessage[]>()
+  private readonly runHistory = new Map<string, SessionRun[]>()
   private readonly snapshotHistory = new Map<string, SessionSnapshot[]>()
 
   async create(input: CreateSessionInput) {
@@ -214,6 +254,43 @@ export class MemorySessionStore implements SessionStore {
     await this.touch(sessionID)
   }
 
+  async runs(sessionID: string) {
+    return [...(this.runHistory.get(sessionID) ?? [])]
+  }
+
+  async getRun(sessionID: string, runID: string) {
+    return (this.runHistory.get(sessionID) ?? []).find((run) => run.id === runID)
+  }
+
+  async appendRun(input: Omit<SessionRun, "id" | "time"> & { id?: string; time?: SessionRun["time"] }) {
+    const now = Date.now()
+    const run: SessionRun = {
+      ...input,
+      id: input.id ?? createID("run"),
+      time: input.time ?? {
+        created: now,
+        updated: now,
+      },
+    }
+    this.runHistory.set(run.sessionID, [...(this.runHistory.get(run.sessionID) ?? []), run])
+    await this.touch(run.sessionID)
+    return run
+  }
+
+  async updateRun(sessionID: string, runID: string, patch: UpdateSessionRunPatch) {
+    const runs = this.runHistory.get(sessionID) ?? []
+    const current = runs.find((run) => run.id === runID)
+    if (!current) throw new Error(`Session run not found: ${runID}`)
+
+    const next = applySessionRunPatch(current, patch)
+    this.runHistory.set(
+      sessionID,
+      runs.map((run) => (run.id === runID ? next : run)),
+    )
+    await this.touch(sessionID)
+    return next
+  }
+
   async snapshots(sessionID: string) {
     return [...(this.snapshotHistory.get(sessionID) ?? [])]
   }
@@ -282,6 +359,24 @@ function applySessionPatch(session: HarnessSession, patch: UpdateSessionPatch): 
     ...(patch.revert !== undefined && { revert: patch.revert ?? undefined }),
     time: {
       ...session.time,
+      ...patch.time,
+      updated: patch.time?.updated ?? Date.now(),
+    },
+  }
+}
+
+function applySessionRunPatch(run: SessionRun, patch: UpdateSessionRunPatch): SessionRun {
+  return {
+    ...run,
+    ...(patch.status !== undefined && { status: patch.status }),
+    ...(patch.baselineHash !== undefined && { baselineHash: patch.baselineHash }),
+    ...(patch.restoreHash !== undefined && { restoreHash: patch.restoreHash }),
+    ...(patch.firstMessageID !== undefined && { firstMessageID: patch.firstMessageID }),
+    ...(patch.lastMessageID !== undefined && { lastMessageID: patch.lastMessageID }),
+    ...(patch.summary !== undefined && { summary: patch.summary ?? undefined }),
+    ...(patch.error !== undefined && { error: patch.error ?? undefined }),
+    time: {
+      ...run.time,
       ...patch.time,
       updated: patch.time?.updated ?? Date.now(),
     },

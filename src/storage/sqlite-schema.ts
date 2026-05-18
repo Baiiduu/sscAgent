@@ -27,19 +27,42 @@ CREATE INDEX IF NOT EXISTS session_workspace_idx ON session(workspace_id);
 CREATE INDEX IF NOT EXISTS session_parent_idx ON session(parent_id);
 CREATE INDEX IF NOT EXISTS session_updated_idx ON session(time_updated);
 
+CREATE TABLE IF NOT EXISTS run (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  baseline_hash TEXT,
+  restore_hash TEXT,
+  first_message_id TEXT,
+  last_message_id TEXT,
+  summary_json TEXT,
+  error TEXT,
+  time_created INTEGER NOT NULL,
+  time_updated INTEGER NOT NULL,
+  time_completed INTEGER,
+  time_reverted INTEGER,
+  FOREIGN KEY(session_id) REFERENCES session(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS run_session_time_idx ON run(session_id, time_created, id);
+CREATE INDEX IF NOT EXISTS run_session_status_idx ON run(session_id, status);
+
 CREATE TABLE IF NOT EXISTS message (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
+  run_id TEXT,
   role TEXT NOT NULL,
   parent_id TEXT,
   finish_reason TEXT,
   time_created INTEGER NOT NULL,
   time_completed INTEGER,
-  FOREIGN KEY(session_id) REFERENCES session(id) ON DELETE CASCADE
+  FOREIGN KEY(session_id) REFERENCES session(id) ON DELETE CASCADE,
+  FOREIGN KEY(run_id) REFERENCES run(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS message_session_time_idx ON message(session_id, time_created, id);
 CREATE INDEX IF NOT EXISTS message_parent_idx ON message(parent_id);
+CREATE INDEX IF NOT EXISTS message_run_idx ON message(run_id);
 
 CREATE TABLE IF NOT EXISTS part (
   id TEXT PRIMARY KEY,
@@ -68,6 +91,7 @@ CREATE INDEX IF NOT EXISTS part_tool_call_idx ON part(tool_call_id);
 CREATE TABLE IF NOT EXISTS snapshot (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
+  run_id TEXT,
   message_id TEXT,
   part_id TEXT,
   tool_call_id TEXT,
@@ -78,10 +102,12 @@ CREATE TABLE IF NOT EXISTS snapshot (
   diff TEXT,
   time_created INTEGER NOT NULL,
   FOREIGN KEY(session_id) REFERENCES session(id) ON DELETE CASCADE,
+  FOREIGN KEY(run_id) REFERENCES run(id) ON DELETE SET NULL,
   FOREIGN KEY(message_id) REFERENCES message(id) ON DELETE SET NULL,
   FOREIGN KEY(part_id) REFERENCES part(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS snapshot_session_time_idx ON snapshot(session_id, time_created, id);
+CREATE INDEX IF NOT EXISTS snapshot_run_idx ON snapshot(run_id);
 CREATE INDEX IF NOT EXISTS snapshot_tool_call_idx ON snapshot(tool_call_id);
 `
