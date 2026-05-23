@@ -12,7 +12,6 @@ import type { ToolDef } from "./schema"
 import { createSkillTool } from "./skill"
 import {
   createDependencyUpdateCheckTool,
-  createSBOMGenerateTool,
   createVulnerabilityLookupTool,
 } from "./ssc"
 
@@ -30,7 +29,6 @@ export function createBuiltinTools(extra: ToolDef[] = []): ToolDef[] {
     createEditTool(),
     createWriteTool(),
     createSkillTool(),
-    createSBOMGenerateTool(),
     createDependencyUpdateCheckTool(),
     createVulnerabilityLookupTool(),
     ...extra,

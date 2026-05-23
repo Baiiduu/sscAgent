@@ -139,13 +139,15 @@ function createAnalysisPrompt(repoUrl: string) {
     "",
     "Follow this workflow:",
     "1. Load the git-clone skill and clone the repository into ./repos/ inside the session workspace.",
-    "2. Generate a CycloneDX SBOM for the cloned repository with the sbom_generate tool.",
-    "3. Select up to 15 important direct dependency PURLs from the SBOM summary.",
-    "4. Query OSV for those PURLs with vulnerability_lookup and includeDetails=true.",
-    "5. Summarize the findings: vulnerable packages, most severe CVEs/GHSAs, severity, affected versions, and upgrade guidance.",
-    "6. Rank the recommended remediation work by risk and likely impact.",
+    "2. Explore the repository structure with read/glob/grep/bash and identify dependency manifests or lockfiles.",
+    "3. Extract important direct runtime dependencies from project evidence such as package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, bun.lock, requirements.txt, pyproject.toml, poetry.lock, go.mod, pom.xml, or build.gradle.",
+    "4. Construct valid PURLs with exact versions when available. Prefer lockfile versions; skip dependencies whose version cannot be determined with reasonable confidence.",
+    "5. Select up to 15 important PURLs and query OSV with vulnerability_lookup and includeDetails=true.",
+    "6. Summarize the findings: vulnerable packages, most severe CVEs/GHSAs, severity, affected versions, and upgrade guidance.",
+    "7. Rank the recommended remediation work by risk, dependency role, source-code usage evidence, and likely impact.",
     "",
-    "Report progress clearly after each major step. Do not skip tool calls and do not invent vulnerability data.",
+    "Use the relevant skills for dependency discovery, vulnerability impact analysis, and upgrade planning when helpful.",
+    "Report progress clearly after each major step. Use only dependency versions and vulnerability data supported by repository evidence or tool results.",
   ].join("\n")
 }
 

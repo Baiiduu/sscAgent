@@ -5,113 +5,103 @@ description: 分析漏洞依赖在项目源码中的实际可达性，判断是�
 
 # 源码级依赖可达性分析
 
-当用户关心某个漏洞是否真正影响到项目、需要区分"存在但不可达"和"真实可达"的漏洞时，使用本技能。
+当用户关心某个漏洞依赖是否真正影响项目，或者需要区分“存在但不使用”和“真实可达”时，使用本技能。
 
-本技能只负责分析"漏洞依赖是否被源码实际调用"，不负责评估漏洞严重性、不负责升级依赖。
+本技能只负责静态分析依赖是否被源码实际引用，不负责评估漏洞严重性、升级依赖、生成 SBOM、安装依赖、运行测试或修改文件。
 
 ## 分析目标
 
-对于给定的漏洞依赖，判断其在项目源码中的可达性状态：
+对给定的漏洞依赖判断可达性状态：
 
 | 状态 | 含义 |
-|------|------|
-| direct_reachable | 源码直接 import/require 了该漏洞包，且调用了受影响 API |
-| transitive_reachable | 通过传递依赖引入，但调用链可追踪到受影响代码路径 |
-| dead_code | 存在引用但位于死代码路径（条件编译排除、已注释、废弃分支） |
-| not_imported | 依赖存在于 SBOM/lockfile 但源码中从未 import/require |
-| unknown | 无法确定，需要人工审查 |
+| --- | --- |
+| direct_reachable | 源码直接 import/require/use 该依赖，并可能调用受影响 API |
+| transitive_reachable | 通过直接依赖间接引入，且调用链可追踪到项目源码 |
+| not_imported | 依赖存在于 manifest、lockfile、SBOM 或 OSV 结果中，但源码未发现引用 |
+| dead_code | 引用位于注释、测试、条件排除或不可达路径中 |
+| unknown | 静态证据不足，无法可靠判断 |
 
-## 前置准备
+## 输入证据
 
-优先从当前会话工作区读取：
+优先读取：
 
 ```text
-./repos/<repo-name>/        # 源代码目录
-./artifacts/<repo-name>/sbom.cdx.json   # SBOM，含组件清单和依赖关系
+./repos/<repo-name>/
+./artifacts/<repo-name>/osv-query-result.json
+./artifacts/<repo-name>/dependency-update-check.json
+```
+
+可以使用已有 SBOM 作为补充证据，但不要生成 SBOM，也不要调用 `sbom_generate`：
+
+```text
+./artifacts/<repo-name>/sbom.cdx.json
 ./artifacts/<repo-name>/sbom-summary.json
 ```
 
 如果仓库尚未克隆，先使用 `git-clone` 技能克隆。
 
-如果 SBOM 不存在，先调用 `sbom_generate` 工具生成。
-
 ## 执行流程
 
 ### 1. 确定分析目标
 
-从以下来源获取待分析的漏洞依赖列表：
+从以下来源获取待分析依赖：
 
-- 当前会话中已有的 `vulnerability_lookup` 或 OSV 查询结果。
-- 用户直接指定的 PURL 或 CVE 列表。
-- `sbom.cdx.json` 中的 components 列表。
+- 当前会话已有的 `vulnerability_lookup` 或 OSV 查询结果
+- 当前会话已有的 `dependency-discovery.json`
+- 用户指定的 PURL、包名、CVE/GHSA/OSV ID
+- manifest 或 lockfile 中的依赖
+- 已存在 SBOM 中的 components
 
-每个待分析的依赖应至少包含：包名、版本、生态、已知漏洞 ID。
+每个目标应尽量包含包名、生态、版本和漏洞 ID。
 
-### 2. 按生态搜索源码引用
+如果本次分析过程中重新发现或筛选了依赖目标，必须同步写入或更新：
 
-根据包管理器生态，使用对应的搜索策略：
-
-**JavaScript/TypeScript (npm)：**
-
-```powershell
-# 搜索 import 语句
-Select-String -Path ".\repos\<repo-name>\**\*.{js,jsx,ts,tsx}" -Pattern "require\(['`"]<package-name>['`"]\)|from ['`"]<package-name>['`"]" -List
+```text
+./artifacts/<repo-name>/dependency-discovery.json
 ```
 
-**Java/Maven：**
+不要只把依赖清单保存在对话中。
 
-```powershell
-Select-String -Path ".\repos\<repo-name>\**\*.java" -Pattern "import\s+<group-id-or-prefix>\.<artifact-id>" -List
-```
+### 2. 搜索源码引用
 
-**Python：**
+根据生态使用静态搜索：
 
-```powershell
-Select-String -Path ".\repos\<repo-name>\**\*.py" -Pattern "^import\s+<package-name>|^from\s+<package-name>" -List
-```
+- JavaScript/TypeScript: 搜索 `import`, `require`, dynamic import, framework config
+- Python: 搜索 `import`, `from ... import`
+- Java/Kotlin: 搜索 `import`, package usage, build dependency coordinates
+- Go: 搜索 import path
+- Ruby/PHP/Rust/.NET: 搜索对应语言的 import/use/require 声明
 
-如果包名包含特殊字符（如 `@scope/name`、带连字符等），尝试多种搜索模式：
+包名包含 scope、连字符、模块子路径时，要尝试多种匹配方式，例如 `lodash`、`lodash/merge`、`@scope/name`。
 
-- 精确匹配包名。
-- 匹配包名的主要部分（如 `lodash` 匹配 `lodash/merge`）。
-- 对于传递依赖，搜索直接依赖的代码中是否 re-export 了目标包。
+### 3. 判断受影响 API
 
-### 3. 确定受影响 API 的调用
+如果漏洞描述指出特定函数、类、方法、配置项或协议路径，继续搜索这些 API 是否在项目源码中出现。
 
-如果漏洞描述中指明受影响的具体函数/方法/类：
+仅发现依赖存在但没有源码引用时，不要标记为 reachable。
 
-```powershell
-# 搜索受影响 API 在项目中的使用
-Select-String -Path ".\repos\<repo-name>\**\*.{js,ts,java,py}" -Pattern "<affected-api-name>" -List
-```
+### 4. 分析传递依赖
 
-如果存在调用，标记为 `direct_reachable`。
+对于传递依赖：
 
-如果依赖被 import 但未调用受影响 API，标记为 `low_risk` 并说明情况。
+1. 从 lockfile、manifest、已有 SBOM 或 OSV 结果识别引入链。
+2. 找到引入该传递依赖的直接依赖。
+3. 检查项目源码是否使用该直接依赖。
+4. 如果调用链证据不足，标记为 `unknown` 或 `not_imported`，不要猜测。
 
-### 4. 分析传递依赖链
+### 5. 排除低相关证据
 
-对于不是直接依赖的包：
+降低以下引用的优先级：
 
-- 读取 `sbom.cdx.json` 中的 `dependencies` 数组，查找引入该传递依赖的直接依赖。
-- 在直接依赖的代码中搜索对该传递依赖的引用（re-export / re-require）。
-- 搜索项目代码中对该直接依赖的使用。
+- 测试文件、示例、fixture、demo
+- 注释中的字符串
+- 构建脚本或开发工具路径
+- 条件编译排除路径
+- 仅在文档中出现的包名
 
-如果调用链能完整追溯到项目源码，标记为 `transitive_reachable`。
+## 输出格式
 
-如果调用链在传递依赖层断裂（该依赖被引入但未实际使用），标记为 `not_imported`。
-
-### 5. 排除死代码
-
-当找到引用后，验证代码路径是否有效：
-
-- 如果引用位于被条件编译排除的代码（如 `// @ts-ignore`、`#ifdef`、平台特定分支），标记为 `dead_code`。
-- 如果引用位于测试文件（`*.test.js`、`*Test.java`、`test_*.py`）且用户未要求分析测试依赖，降低优先级并标注。
-- 如果引用位于已被注释的代码块中，标记为 `dead_code`。
-
-### 6. 汇总结果
-
-输出格式：
+输出结构化结果：
 
 ```json
 {
@@ -144,17 +134,11 @@ Select-String -Path ".\repos\<repo-name>\**\*.{js,ts,java,py}" -Pattern "<affect
 }
 ```
 
-## 安全约束
+## 安全边界
 
-- 只读源码，不执行源码、不安装依赖、不启动项目。
-- 不要修改任何文件。
-- 不要使用需要安装或编译的分析工具。
-
-## 边界
-
-本技能不负责：
-
-- 评估漏洞严重性或优先级（那是 impact-analysis 的工作）。
-- 生成或修改 SBOM。
-- 修复漏洞或升级依赖。
-- 运行测试或构建验证。
+- 只读源码和依赖声明。
+- 不安装依赖。
+- 不执行项目代码。
+- 不启动服务。
+- 不修改任何文件。
+- 不生成或修改 SBOM。
