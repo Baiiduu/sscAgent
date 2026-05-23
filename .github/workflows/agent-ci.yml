@@ -56,13 +56,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup tmate session
-        if: ${{ inputs.debug_enabled }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
-        with:
-          limit-access-to-actor: true
-
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -73,3 +66,10 @@ jobs:
 
       - name: Analyze repository
         run: bun run analyze "$REPO_URL"
+
+      - name: Setup tmate session
+        if: ${{ always() && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
