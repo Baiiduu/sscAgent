@@ -4,6 +4,7 @@
   "private": false,
   "type": "module",
   "scripts": {
+    "analyze": "bun src/cli/analyze-repo.ts",
     "check": "tsc --noEmit"
   },
   "dependencies": {

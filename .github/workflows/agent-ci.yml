@@ -7,6 +7,15 @@ on:
       - master
   pull_request:
   workflow_dispatch:
+    inputs:
+      repo_url:
+        type: string
+        required: false
+        description: "Repository URL to analyze"
+      debug_enabled:
+        type: boolean
+        default: false
+        description: 'Enable debug mode for the workflow'
 
 jobs:
   typecheck:
@@ -27,3 +36,40 @@ jobs:
 
       - name: Typecheck
         run: bun run check
+
+  analyze:
+    name: Analyze repository
+    runs-on: ubuntu-latest
+    needs: typecheck
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.repo_url != '' }}
+
+    env:
+      REPO_URL: ${{ inputs.repo_url }}
+      SMOKE_PROVIDER: ${{ vars.SMOKE_PROVIDER || 'deepseek' }}
+      SMOKE_MODEL: ${{ vars.SMOKE_MODEL || 'deepseek-v4-flash' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup tmate session
+        if: ${{ inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
+        with:
+          limit-access-to-actor: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Analyze repository
+        run: bun run analyze "$REPO_URL"
