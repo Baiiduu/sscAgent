@@ -159,35 +159,15 @@ function createConfiguredProviderRuntime(options: AnalyzeRepoOptions) {
       providerID,
       modelID,
     },
-    providers:
-      providerID === "deepseek"
-        ? {
-            deepseek: {
-              id: "deepseek",
-              kind: "openai-compatible",
-              name: "DeepSeek",
-              env: ["DEEPSEEK_API_KEY"],
-              options: {
-                baseURL: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
-              },
-              models: {
-                "deepseek-v4-flash": {
-                  id: "deepseek-v4-flash",
-                  name: "DeepSeek V4 Flash",
-                  providerID: "deepseek",
-                  api: {
-                    id: "deepseek-v4-flash",
-                    npm: "@ai-sdk/openai-compatible",
-                  },
-                  limit: {
-                    context: 1_000_000,
-                    output: 8_000,
-                  },
-                },
-              },
+    providers: process.env.DEEPSEEK_BASE_URL
+      ? {
+          deepseek: {
+            options: {
+              baseURL: process.env.DEEPSEEK_BASE_URL,
             },
-          }
-        : undefined,
+          },
+        }
+      : undefined,
     env,
   })
 }

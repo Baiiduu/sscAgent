@@ -173,6 +173,26 @@ function builtinProviders() {
         }),
       ],
     }),
+    deepseek: provider({
+      id: "deepseek",
+      kind: "openai-compatible",
+      name: "DeepSeek",
+      env: ["DEEPSEEK_API_KEY"],
+      npm: "@ai-sdk/openai-compatible",
+      options: {
+        baseURL: "https://api.deepseek.com",
+      },
+      models: [
+        model("deepseek", "deepseek-v4-flash", "DeepSeek V4 Flash", {
+          context: 1_000_000,
+          output: 384_000,
+        }),
+        model("deepseek", "deepseek-v4-pro", "DeepSeek V4 Pro", {
+          context: 1_000_000,
+          output: 384_000,
+        }),
+      ],
+    }),
   }
 }
 
@@ -182,6 +202,7 @@ function provider(input: {
   name: string
   env: string[]
   npm: string
+  options?: ProviderInfo["options"]
   models: ModelInfo[]
 }) {
   return ProviderInfo.parse({
