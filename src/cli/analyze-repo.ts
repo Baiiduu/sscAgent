@@ -160,7 +160,7 @@ function createAnalysisPrompt(options: AnalyzeRepoOptions) {
 function createConfiguredProviderRuntime(options: AnalyzeRepoOptions) {
   const env = createEnvironment(process.env)
   const providerID = options.providerID ?? process.env.SMOKE_PROVIDER ?? (process.env.DEEPSEEK_API_KEY ? "deepseek" : "openai")
-  const modelID = options.modelID ?? process.env.SMOKE_MODEL ?? (providerID === "deepseek" ? "deepseek-v4-flash" : "gpt-4.1-mini")
+  const modelID = options.modelID ?? process.env.SMOKE_MODEL ?? (providerID === "deepseek" ? "deepseek-v4-flash" : "gpt-5.5")
 
   return createProviderRuntime({
     defaultModel: {

@@ -69,14 +69,14 @@ SMOKE_MODEL=deepseek-v4-pro
 
 ```text
 SMOKE_PROVIDER=openai
-SMOKE_MODEL=gpt-5
+SMOKE_MODEL=gpt-5.5
 ```
 
-也可以使用更轻量的 OpenAI 模型：
+也可以使用另一个推荐的 OpenAI 模型：
 
 ```text
 SMOKE_PROVIDER=openai
-SMOKE_MODEL=gpt-5-mini
+SMOKE_MODEL=gpt-5.4
 ```
 
 如果使用 Anthropic：

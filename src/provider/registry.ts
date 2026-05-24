@@ -30,7 +30,7 @@ export function createProviderRegistry(input: CreateProviderRegistryInput = {}):
   const providers = mergeProviders(builtinProviders(), input.providers ?? {})
   const fallback = input.defaultModel ?? {
     providerID: "openai",
-    modelID: "gpt-4.1",
+    modelID: "gpt-5.5",
   }
 
   return {
@@ -151,6 +151,14 @@ function builtinProviders() {
           output: 128_000,
         }),
         model("openai", "gpt-5-mini", "GPT-5 Mini", {
+          context: 400_000,
+          output: 128_000,
+        }),
+        model("openai", "gpt-5.4", "GPT-5.4", {
+          context: 400_000,
+          output: 128_000,
+        }),
+        model("openai", "gpt-5.5", "GPT-5.5", {
           context: 400_000,
           output: 128_000,
         }),
