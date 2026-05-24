@@ -152,6 +152,7 @@ function createAnalysisPrompt(options: AnalyzeRepoOptions) {
     "5. Ensure dependency discovery is written to ./artifacts/<repo-name>/dependency-discovery.json before OSV lookup.",
     "6. Ensure the final remediation plan is written to ./artifacts/<repo-name>/upgrade-plan.md.",
     "",
+    "Respond in Chinese. User-facing progress updates, summaries, and remediation explanations should be written in Chinese.",
     "Report progress clearly after each major step. Use only dependency versions and vulnerability data supported by repository evidence or tool results.",
   ].join("\n")
 }
