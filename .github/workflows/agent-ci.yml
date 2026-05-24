@@ -82,7 +82,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-data
-          path: .agent-data/**
+          path: ${{ github.workspace }}/.agent-data/**
+          include-hidden-files: true
           if-no-files-found: warn
 
       - name: Setup tmate session
