@@ -195,7 +195,7 @@ function parseArgs(args: string[]): AnalyzeRepoOptions {
     repoUrl,
     providerID: process.env.SMOKE_PROVIDER,
     modelID: process.env.SMOKE_MODEL,
-    maxIterations: Number(process.env.ANALYZE_MAX_ITERATIONS ?? process.env.SMOKE_MAX_ITERATIONS ?? 30),
+    maxIterations: Number(process.env.ANALYZE_MAX_ITERATIONS ?? process.env.SMOKE_MAX_ITERATIONS ?? 100),
     executionMode: parseExecutionMode(process.env.ANALYSIS_EXECUTION_MODE),
   }
 }
