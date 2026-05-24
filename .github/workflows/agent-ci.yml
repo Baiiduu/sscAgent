@@ -12,6 +12,15 @@ on:
         type: string
         required: false
         description: "Repository URL to analyze"
+      execution_mode:
+        type: choice
+        required: true
+        default: "analysis_only"
+        description: "Analysis execution mode"
+        options:
+          - analysis_only
+          - repair
+          - repair_and_validate
       debug_enabled:
         type: boolean
         default: false
@@ -45,6 +54,7 @@ jobs:
 
     env:
       REPO_URL: ${{ inputs.repo_url }}
+      ANALYSIS_EXECUTION_MODE: ${{ inputs.execution_mode }}
       SMOKE_PROVIDER: ${{ vars.SMOKE_PROVIDER || 'deepseek' }}
       SMOKE_MODEL: ${{ vars.SMOKE_MODEL || 'deepseek-v4-flash' }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

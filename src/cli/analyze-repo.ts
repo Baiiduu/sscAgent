@@ -12,7 +12,10 @@ interface AnalyzeRepoOptions {
   providerID?: string
   modelID?: string
   maxIterations: number
+  executionMode: AnalysisExecutionMode
 }
+
+type AnalysisExecutionMode = "analysis_only" | "repair" | "repair_and_validate"
 
 interface RunEvent {
   type: string
@@ -50,7 +53,7 @@ async function analyzeRepo(options: AnalyzeRepoOptions) {
   const events: RunEvent[] = []
 
   try {
-    await runtime.store.appendMessage(session.id, createUserMessage(createAnalysisPrompt(options.repoUrl)))
+    await runtime.store.appendMessage(session.id, createUserMessage(createAnalysisPrompt(options)))
 
     const permission = createPermissionRuntime({
       onAsk: async (request) => {
@@ -131,17 +134,21 @@ async function analyzeRepo(options: AnalyzeRepoOptions) {
   }
 }
 
-function createAnalysisPrompt(repoUrl: string) {
+function createAnalysisPrompt(options: AnalyzeRepoOptions) {
+  const mode = options.executionMode
+  const authorization = authorizationPrompt(mode)
+
   return [
     "You are running a supply-chain security analysis for an open-source repository.",
     "",
-    `Repository URL: ${repoUrl}`,
+    `Repository URL: ${options.repoUrl}`,
+    `Execution mode: ${mode}`,
     "",
     "Default workflow:",
     "1. Load the git-clone skill and clone the repository into ./repos/ inside the session workspace.",
     "2. Load the vulnerability-impact-analysis skill and execute its five-stage workflow in order.",
-    "3. For this unattended analysis run, complete stages 1 through 3 by default: dependency discovery, OSV vulnerability review, and remediation planning.",
-    "4. Do not enter stage 4 static repair or stage 5 validation unless the user explicitly authorized those stages in the request.",
+    "3. Apply the GitHub Actions execution-mode authorization below exactly.",
+    authorization,
     "5. Ensure dependency discovery is written to ./artifacts/<repo-name>/dependency-discovery.json before OSV lookup.",
     "6. Ensure the final remediation plan is written to ./artifacts/<repo-name>/upgrade-plan.md.",
     "",
@@ -186,7 +193,32 @@ function parseArgs(args: string[]): AnalyzeRepoOptions {
     providerID: process.env.SMOKE_PROVIDER,
     modelID: process.env.SMOKE_MODEL,
     maxIterations: Number(process.env.ANALYZE_MAX_ITERATIONS ?? process.env.SMOKE_MAX_ITERATIONS ?? 30),
+    executionMode: parseExecutionMode(process.env.ANALYSIS_EXECUTION_MODE),
   }
+}
+
+function parseExecutionMode(value: string | undefined): AnalysisExecutionMode {
+  if (value === "repair" || value === "repair_and_validate") return value
+  return "analysis_only"
+}
+
+function authorizationPrompt(mode: AnalysisExecutionMode) {
+  if (mode === "repair") {
+    return [
+      "4. The user has explicitly authorized stage 4 static repair through GitHub Actions execution_mode=repair.",
+      "   Complete stages 1 through 4. Do not enter stage 5 validation.",
+    ].join("\n")
+  }
+  if (mode === "repair_and_validate") {
+    return [
+      "4. The user has explicitly authorized stage 4 static repair and stage 5 validation through GitHub Actions execution_mode=repair_and_validate.",
+      "   Complete stages 1 through 5.",
+    ].join("\n")
+  }
+  return [
+    "4. No repair or validation authorization was granted. Complete stages 1 through 3 only.",
+    "   Do not enter stage 4 static repair or stage 5 validation.",
+  ].join("\n")
 }
 
 function isRepositoryUrl(value: string) {
