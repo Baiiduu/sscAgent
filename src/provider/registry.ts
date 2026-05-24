@@ -155,11 +155,11 @@ function builtinProviders() {
           output: 128_000,
         }),
         model("openai", "gpt-5.4", "GPT-5.4", {
-          context: 400_000,
+          context: 1_050_000,
           output: 128_000,
         }),
         model("openai", "gpt-5.5", "GPT-5.5", {
-          context: 400_000,
+          context: 1_050_000,
           output: 128_000,
         }),
       ],
