@@ -15,7 +15,7 @@ interface AnalyzeRepoOptions {
   executionMode: AnalysisExecutionMode
 }
 
-type AnalysisExecutionMode = "analysis_only" | "repair" | "repair_and_validate"
+type AnalysisExecutionMode = "upstream_analysis" | "reachability_analysis" | "remediation_reproduction" | "benchmark"
 
 interface RunEvent {
   type: string
@@ -139,21 +139,23 @@ function createAnalysisPrompt(options: AnalyzeRepoOptions) {
   const authorization = authorizationPrompt(mode)
 
   return [
-    "You are running a supply-chain security analysis for an open-source repository.",
+    "你正在对一个开源项目执行安全分析。",
     "",
-    `Repository URL: ${options.repoUrl}`,
-    `Execution mode: ${mode}`,
+    `仓库地址：${options.repoUrl}`,
+    `执行模式：${mode}`,
+    `Benchmark 名称：${process.env.ANALYSIS_BENCHMARK_NAME ?? "未指定"}`,
     "",
-    "Default workflow:",
-    "1. Load the git-clone skill and clone the repository into ./repos/ inside the session workspace.",
-    "2. Load the vulnerability-impact-analysis skill and execute its five-stage workflow in order.",
-    "3. Apply the GitHub Actions execution-mode authorization below exactly.",
+    "默认流程：",
+    "1. 加载 git-clone skill，将仓库克隆到当前 session workspace 的 ./repos/ 目录。",
+    "2. 加载 vulnerability-impact-analysis skill，并按当前 execution_mode 执行对应阶段。",
+    "3. 必须严格遵守下面的 GitHub Actions execution_mode 边界。",
     authorization,
-    "5. Ensure dependency discovery is written to ./artifacts/<repo-name>/dependency-discovery.json before OSV lookup.",
-    "6. Ensure the final remediation plan is written to ./artifacts/<repo-name>/upgrade-plan.md.",
+    "5. 在漏洞匹配、可达性分析或修复复现前，必须确保依赖发现结果写入 ./artifacts/<repo-name>/dependency-discovery.json。",
+    "6. 最终应尽量写出中文处置建议到 ./artifacts/<repo-name>/upgrade-plan.md。",
+    "7. 如果当前模式允许修复复现或 benchmark，应优先生成教学型 PoC 到 ./artifacts/<repo-name>/poc.md，用于解释触发链路和修复前后现象；不要默认生成武器化 exploit。",
     "",
-    "Respond in Chinese. User-facing progress updates, summaries, and remediation explanations should be written in Chinese.",
-    "Report progress clearly after each major step. Use only dependency versions and vulnerability data supported by repository evidence or tool results.",
+    "所有面向用户的进度、摘要、风险解释和修复建议都必须使用中文。",
+    "每个主要阶段完成后都要清楚报告进展。依赖版本、漏洞编号、严重性、可达性结论和修复建议必须由仓库证据或工具结果支撑，不要编造。",
   ].join("\n")
 }
 
@@ -199,26 +201,43 @@ function parseArgs(args: string[]): AnalyzeRepoOptions {
 }
 
 function parseExecutionMode(value: string | undefined): AnalysisExecutionMode {
-  if (value === "repair" || value === "repair_and_validate") return value
-  return "analysis_only"
+  if (
+    value === "upstream_analysis" ||
+    value === "reachability_analysis" ||
+    value === "remediation_reproduction" ||
+    value === "benchmark"
+  ) {
+    return value
+  }
+  return "reachability_analysis"
 }
 
 function authorizationPrompt(mode: AnalysisExecutionMode) {
-  if (mode === "repair") {
+  if (mode === "upstream_analysis") {
     return [
-      "4. The user has explicitly authorized stage 4 static repair through GitHub Actions execution_mode=repair.",
-      "   Complete stages 1 through 4. Do not enter stage 5 validation.",
+      "4. 当前为 upstream_analysis：只允许执行上游分析和候选发现。",
+      "   允许执行 security-discovery；不允许执行 security-triage 的可达性结论，不允许执行 security-remediation。",
+      "   不允许修改目标项目文件，不允许运行测试、构建、安装依赖或启动服务。",
     ].join("\n")
   }
-  if (mode === "repair_and_validate") {
+  if (mode === "remediation_reproduction") {
     return [
-      "4. The user has explicitly authorized stage 4 static repair and stage 5 validation through GitHub Actions execution_mode=repair_and_validate.",
-      "   Complete stages 1 through 5.",
+      "4. 当前为 remediation_reproduction：允许执行上游分析、可达性分析、修复、复现和验证闭环。",
+      "   可以加载并执行 security-discovery、security-triage 和 security-remediation。",
+      "   只允许在目标仓库工作区内做与已确认问题直接相关的最小必要修改，并运行最小必要验证命令。",
+    ].join("\n")
+  }
+  if (mode === "benchmark") {
+    return [
+      "4. 当前为 benchmark：按基准测试任务协议运行。",
+      "   允许根据 benchmark 输入 checkout 指定 branch、tag、commit 或 base_commit，并执行规定的复现、修复和评测命令。",
+      "   不要把 benchmark 模式当成普通仓库自由分析；必须优先遵守任务描述、评测脚本和输出格式。",
     ].join("\n")
   }
   return [
-    "4. No repair or validation authorization was granted. Complete stages 1 through 3 only.",
-    "   Do not enter stage 4 static repair or stage 5 validation.",
+    "4. 当前为 reachability_analysis：允许执行上游分析和可达性分析，并生成中文处置建议。",
+    "   可以加载并执行 security-discovery 和 security-triage；不允许执行 security-remediation。",
+    "   不允许修改目标项目文件，不允许安装依赖、更新 lockfile、运行测试、构建或启动服务。",
   ].join("\n")
 }
 

@@ -1,14 +1,8 @@
 # SSC Agent
 
-SSC Agent 是一个面向开源项目的供应链安全分析 agent。你给它一个 GitHub 仓库 URL，它会在 GitHub Actions 中克隆项目、静态发现依赖、查询 OSV 漏洞数据，并生成中文分析报告和修复建议。
+SSC Agent 是一个面向开源项目的安全分析 agent。你给它一个 GitHub 仓库 URL，它会在 GitHub Actions 中克隆项目，执行上游漏洞分析、可达性分析，并在授权后进入 PoC、复现、修复和验证阶段。
 
-默认流程不会修改目标项目代码，只执行：
-
-1. 依赖发现
-2. OSV 漏洞审阅
-3. 影响评估与修复方案
-
-阶段四“静态修复”和阶段五“验证”只有在你手动选择授权模式后才会执行。
+默认推荐模式是 `reachability_analysis`：它不仅看“依赖是否命中已知漏洞”，还会判断“这个项目是否真的可能用到受影响路径”。
 
 ## 快速上手
 
@@ -16,7 +10,7 @@ SSC Agent 是一个面向开源项目的供应链安全分析 agent。你给它�
 
 先 Fork 本仓库到你自己的 GitHub 账号或组织下。
 
-进入 Fork 后，打开：
+进入 Fork 后打开：
 
 ```text
 Settings -> Secrets and variables -> Actions
@@ -33,14 +27,14 @@ Secrets:
 DEEPSEEK_API_KEY=你的 DeepSeek API Key
 ```
 
-可选 OpenAI：
+也可以使用 OpenAI：
 
 ```text
 Secrets:
 OPENAI_API_KEY=你的 OpenAI API Key
 ```
 
-可选 Anthropic：
+也可以使用 Anthropic：
 
 ```text
 Secrets:
@@ -72,7 +66,7 @@ SMOKE_PROVIDER=openai
 SMOKE_MODEL=gpt-5.5
 ```
 
-也可以使用另一个推荐的 OpenAI 模型：
+另一个推荐 OpenAI 模型：
 
 ```text
 SMOKE_PROVIDER=openai
@@ -86,13 +80,7 @@ SMOKE_PROVIDER=anthropic
 SMOKE_MODEL=claude-sonnet-4-5
 ```
 
-`DEEPSEEK_BASE_URL` 通常不用配置，默认是：
-
-```text
-https://api.deepseek.com
-```
-
-只有在你使用代理或兼容网关时才需要设置。
+`DEEPSEEK_BASE_URL` 通常不用配置。只有在你使用代理或兼容网关时才需要设置。
 
 ## 在 GitHub Actions 中运行
 
@@ -106,7 +94,8 @@ Actions -> Agent CI -> Run workflow
 
 ```text
 repo_url=https://github.com/snyk-labs/nodejs-goof.git
-execution_mode=analysis_only
+execution_mode=reachability_analysis
+benchmark_name=swc-bench
 debug_enabled=false
 ```
 
@@ -114,19 +103,36 @@ debug_enabled=false
 
 ### 执行模式
 
-`execution_mode` 控制 agent 被授权执行到哪个阶段：
+`execution_mode` 控制 agent 执行到哪个阶段：
 
 | 模式 | 含义 |
 | --- | --- |
-| `analysis_only` | 默认模式，只执行依赖发现、OSV 查询、影响评估和修复方案 |
-| `repair` | 允许进入静态修复阶段，可能修改工作区中克隆的目标项目文件 |
-| `repair_and_validate` | 允许静态修复和验证，可能运行安装、测试、构建或服务启动命令 |
+| `upstream_analysis` | 只做上游分析：依赖识别、已知漏洞匹配、源码候选发现 |
+| `reachability_analysis` | 默认推荐：上游分析 + 可达性/影响判断 + 中文处置建议 |
+| `remediation_reproduction` | 允许生成教学型 PoC、复现、修复、验证，可能修改工作区中的目标项目文件 |
+| `benchmark` | 预留给 SWC-bench、SEC-bench 等 benchmark 任务，按任务协议运行 |
 
-建议首次使用保持：
+建议首次使用：
 
 ```text
-analysis_only
+reachability_analysis
 ```
+
+如果你想学习漏洞如何触发，选择：
+
+```text
+remediation_reproduction
+```
+
+这个模式会尽量生成 `poc.md`。PoC 默认用于本地学习、解释和授权测试，不是武器化 exploit。
+
+`benchmark_name` 当前预留为：
+
+```text
+swc-bench
+```
+
+只有当 `execution_mode=benchmark` 时，它才有实际意义。
 
 ### 调试模式
 
@@ -162,8 +168,15 @@ agent-data
 
 ```text
 dependency-discovery.json
-osv-query-result.json
+security-candidates.json
+triage-report.json
+risk-ranking.md
 upgrade-plan.md
+poc.md
+repro-script.*
+repair-summary.md
+validation-report.md
+patch.diff
 ```
 
 常见含义：
@@ -171,8 +184,15 @@ upgrade-plan.md
 | 文件 | 用途 |
 | --- | --- |
 | `dependency-discovery.json` | agent 从 manifest、lockfile、源码引用中发现的依赖和 PURL |
-| `osv-query-result.json` | OSV 漏洞查询结果 |
-| `upgrade-plan.md` | 中文修复建议、优先级排序和风险说明 |
+| `security-candidates.json` | 上游分析阶段发现的依赖漏洞候选和源码漏洞候选 |
+| `triage-report.json` | 可达性、影响和优先级判断 |
+| `risk-ranking.md` | 中文风险排序和解释 |
+| `upgrade-plan.md` | 中文处置建议和修复方向 |
+| `poc.md` | 教学型 PoC，解释漏洞触发前提、输入路径、危险 sink、预期现象和修复后现象 |
+| `repro-script.*` | 可选的本地复现脚本，只在安全、低风险、可本地运行时生成 |
+| `repair-summary.md` | 修复复现阶段的修改摘要 |
+| `validation-report.md` | 验证命令、结果和剩余风险 |
+| `patch.diff` | 修复相关 diff |
 
 ## 本地运行
 
@@ -190,6 +210,7 @@ bun install
 DEEPSEEK_API_KEY=你的 DeepSeek API Key
 SMOKE_PROVIDER=deepseek
 SMOKE_MODEL=deepseek-v4-flash
+ANALYSIS_EXECUTION_MODE=reachability_analysis
 ```
 
 运行分析：
@@ -218,15 +239,20 @@ src/
   workspace/    session workspace creation
 
 skills/
+  git-clone/
   vulnerability-impact-analysis/
-  source-dependency-reachability/
-  dependency-upgrade-compatibility-fix/
+  security-discovery/
+  security-triage/
+  security-remediation/
 ```
 
 ## 安全边界
 
-- 默认 `analysis_only` 不修改目标项目源码。
+- `upstream_analysis` 和 `reachability_analysis` 不应修改目标项目源码。
+- `remediation_reproduction` 才允许对工作区中的目标项目做最小必要修改。
+- PoC 默认是教学型、本地复现型材料，不应输出武器化 exploit、真实凭证或真实攻击目标。
+- `benchmark` 必须优先遵守 benchmark 任务协议。
 - API Key 必须放在 GitHub Secrets 或本地 `.env` 中。
-- GitHub Actions runner 是临时环境，job 结束后会销毁。
+- GitHub Actions runner 是临时环境，job 结束后会释放。
 - 需要长期保存结果时，请下载 `agent-data` artifact。
 - 不建议在公开日志中输出 secrets、token、私有仓库内容或完整 lockfile。
