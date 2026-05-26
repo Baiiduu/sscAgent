@@ -82,7 +82,7 @@ SMOKE_MODEL=claude-sonnet-4-5
 
 `DEEPSEEK_BASE_URL` 通常不用配置。只有在你使用代理或兼容网关时才需要设置。
 
-## 在 GitHub Actions 中运行
+## 普通仓库分析
 
 进入：
 
@@ -126,45 +126,119 @@ remediation_reproduction
 
 这个模式会尽量生成 `poc.md`。PoC 默认用于本地学习、解释和授权测试，不是武器化 exploit。
 
-`benchmark_name` 当前预留为：
+## SEC-bench Patch 单测
+
+本仓库提供了一个独立 workflow：
 
 ```text
-swc-bench
+Actions -> SEC-bench Single -> Run workflow
 ```
 
-只有当 `execution_mode=benchmark` 时，它才有实际意义。
-
-### 调试模式
-
-如果打开：
+默认实例：
 
 ```text
-debug_enabled=true
+instance_id=mruby.cve-2022-0240
+eval_mode=medium
+debug_enabled=false
 ```
 
-workflow 会在分析后启动 tmate session，方便你通过 SSH 进入 GitHub runner 查看现场。
-
-如果启用了：
-
-```yaml
-limit-access-to-actor: true
-```
-
-你需要在 GitHub 个人账号中配置 SSH public key：
+它会执行：
 
 ```text
-GitHub -> Settings -> SSH and GPG keys
+1. 读取 benchmarks/secbench/instances.json
+2. 调用本项目 agent 生成 patch.diff
+3. 转换为 SEC-bench evaluator 支持的 smolagent output.jsonl
+4. checkout 官方 SEC-bench 仓库
+5. 调用官方 evaluator
+6. 读取 report_<mode>.jsonl
+7. 在 GitHub Summary 输出 success / failed
 ```
 
-## 查看分析结果
+`eval_mode` 是 SEC-bench patch evaluator 的判定模式：
 
-workflow 运行结束后，打开本次 Actions run 页面，下载 artifact：
+| 模式 | 含义 |
+| --- | --- |
+| `strict` | 最严格，通常要求最终 exit code 为 0 且无 sanitizer |
+| `medium` | 官方默认风格，要求 exit code 匹配数据集记录且无 sanitizer |
+| `generous` | 较宽松，重点看是否执行到最终 PoC 阶段、无超时、无 sanitizer |
+
+单测结果按 SEC-bench 风格展示：
+
+```text
+Success: true
+Score: 1 / 1
+Resolved: 100%
+```
+
+失败时：
+
+```text
+Success: false
+Score: 0 / 1
+Resolved: 0%
+```
+
+### SEC-bench 产物
+
+`SEC-bench Single` 会上传 artifact：
+
+```text
+secbench-agent-data
+```
+
+重点目录：
+
+```text
+.agent-data/
+  workspaces/
+    sessions/
+      <session>/
+        repos/
+        artifacts/
+  secbench/
+    <instance_id>/
+      patch.diff
+      output.jsonl
+      summary.json
+  secbench-eval/
+    <instance_id>/
+      report_medium.jsonl
+```
+
+`output.jsonl` 是给官方 evaluator 的输入，格式类似：
+
+```json
+{
+  "instance_id": "mruby.cve-2022-0240",
+  "test_result": {
+    "git_patch": "diff --git ..."
+  }
+}
+```
+
+`report_<mode>.jsonl` 是官方 evaluator 的输出，关键字段包括：
+
+```json
+{
+  "instance_id": "mruby.cve-2022-0240",
+  "success": true,
+  "reason": "Patch evaluation succeeded.",
+  "exit_code": 0,
+  "model_name": "unknown_model"
+}
+```
+
+SEC-bench 官方 evaluator 会拉取 Docker eval 镜像。默认实例的镜像压缩大小约 0.9 GiB，首次运行可能需要较长时间。
+
+## 查看普通分析结果
+
+`Agent CI` workflow 运行结束后，打开本次 Actions run 页面，下载 artifact：
 
 ```text
 agent-data
 ```
 
-它包含 `.agent-data` 下的运行数据。重点查看：
+重点查看：
 
 ```text
 dependency-discovery.json
@@ -213,10 +287,25 @@ SMOKE_MODEL=deepseek-v4-flash
 ANALYSIS_EXECUTION_MODE=reachability_analysis
 ```
 
-运行分析：
+运行普通仓库分析：
 
 ```bash
 bun run analyze https://github.com/snyk-labs/nodejs-goof.git
+```
+
+运行 SEC-bench 单测 agent 生成阶段：
+
+```bash
+bun run secbench:single -- --instance mruby.cve-2022-0240
+```
+
+解析 SEC-bench evaluator 报告：
+
+```bash
+bun run secbench:report -- \
+  --instance mruby.cve-2022-0240 \
+  --mode medium \
+  --report .agent-data/secbench-eval/mruby.cve-2022-0240/report_medium.jsonl
 ```
 
 类型检查：
@@ -228,6 +317,10 @@ bun run check
 ## 项目结构
 
 ```text
+benchmarks/
+  secbench/
+    instances.json
+
 src/
   agent/        agent profiles and builtin agents
   cli/          command-line entrypoints
@@ -251,8 +344,8 @@ skills/
 - `upstream_analysis` 和 `reachability_analysis` 不应修改目标项目源码。
 - `remediation_reproduction` 才允许对工作区中的目标项目做最小必要修改。
 - PoC 默认是教学型、本地复现型材料，不应输出武器化 exploit、真实凭证或真实攻击目标。
-- `benchmark` 必须优先遵守 benchmark 任务协议。
+- `SEC-bench Single` 的最终成功与否由官方 evaluator 判定，不由 agent 自行声明。
 - API Key 必须放在 GitHub Secrets 或本地 `.env` 中。
 - GitHub Actions runner 是临时环境，job 结束后会释放。
-- 需要长期保存结果时，请下载 `agent-data` artifact。
+- 需要长期保存结果时，请下载对应 artifact。
 - 不建议在公开日志中输出 secrets、token、私有仓库内容或完整 lockfile。
