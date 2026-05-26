@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "analyze": "bun src/cli/analyze-repo.ts",
+    "secbench:single": "bun src/cli/secbench-single.ts",
+    "secbench:report": "bun src/cli/secbench-report.ts",
     "check": "tsc --noEmit"
   },
   "dependencies": {

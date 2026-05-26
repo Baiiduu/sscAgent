@@ -1,0 +1,114 @@
+name: SEC-bench Single
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_id:
+        type: string
+        required: true
+        default: "mruby.cve-2022-0240"
+        description: "SEC-bench instance ID to evaluate"
+      eval_mode:
+        type: choice
+        required: true
+        default: "medium"
+        description: "SEC-bench patch evaluation mode"
+        options:
+          - strict
+          - medium
+          - generous
+      debug_enabled:
+        type: boolean
+        default: false
+        description: "Enable tmate debug session"
+
+jobs:
+  secbench-patch:
+    name: SEC-bench patch single case
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      SECBENCH_INSTANCE_ID: ${{ inputs.instance_id }}
+      SECBENCH_EVAL_MODE: ${{ inputs.eval_mode }}
+      SMOKE_PROVIDER: ${{ vars.SMOKE_PROVIDER || 'deepseek' }}
+      SMOKE_MODEL: ${{ vars.SMOKE_MODEL || 'deepseek-v4-flash' }}
+      SECBENCH_MAX_ITERATIONS: ${{ vars.SECBENCH_MAX_ITERATIONS || vars.ANALYZE_MAX_ITERATIONS || '100' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install agent dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run check
+
+      - name: Generate SEC-bench patch
+        run: bun run secbench:single -- --instance "$SECBENCH_INSTANCE_ID"
+
+      - name: Checkout SEC-bench
+        uses: actions/checkout@v6
+        with:
+          repository: SEC-bench/SEC-bench
+          path: .secbench
+          submodules: recursive
+
+      - name: Install SEC-bench evaluator dependencies
+        working-directory: .secbench
+        run: pip install -r requirements.txt
+
+      - name: Check Docker
+        run: |
+          docker --version
+          docker info
+
+      - name: Evaluate patch with SEC-bench
+        working-directory: .secbench
+        run: |
+          python -m secb.evaluator.eval_instances \
+            --input-dir "$GITHUB_WORKSPACE/.agent-data/secbench/$SECBENCH_INSTANCE_ID" \
+            --output-dir "$GITHUB_WORKSPACE/.agent-data/secbench-eval/$SECBENCH_INSTANCE_ID" \
+            --type patch \
+            --split eval \
+            --agent smolagent \
+            --mode "$SECBENCH_EVAL_MODE" \
+            --num-workers 1
+
+      - name: Report SEC-bench result
+        run: |
+          bun run secbench:report -- \
+            --instance "$SECBENCH_INSTANCE_ID" \
+            --mode "$SECBENCH_EVAL_MODE" \
+            --report "$GITHUB_WORKSPACE/.agent-data/secbench-eval/$SECBENCH_INSTANCE_ID/report_${SECBENCH_EVAL_MODE}.jsonl"
+
+      - name: Upload agent data
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: secbench-agent-data
+          path: ${{ github.workspace }}/.agent-data/**
+          include-hidden-files: true
+          if-no-files-found: warn
+
+      - name: Setup tmate session
+        if: ${{ always() && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true

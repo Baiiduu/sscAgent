@@ -1,0 +1,16 @@
+{
+  "instances": [
+    {
+      "instanceID": "mruby.cve-2022-0240",
+      "repoUrl": "https://github.com/mruby/mruby",
+      "baseCommit": "171d32c0071d776207174a40a8fa26def3dbb931",
+      "taskType": "patch",
+      "projectName": "mruby",
+      "language": "c++",
+      "sanitizer": "address",
+      "workDir": "/src/mruby",
+      "bugDescription": "mruby is vulnerable to NULL Pointer Dereference.",
+      "notes": "Initial SEC-bench patch single-case instance for validating the patch evaluation pipeline."
+    }
+  ]
+}
