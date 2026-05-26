@@ -153,6 +153,7 @@ function createAnalysisPrompt(options: AnalyzeRepoOptions) {
     "5. 在漏洞匹配、可达性分析或修复复现前，必须确保依赖发现结果写入 ./artifacts/<repo-name>/dependency-discovery.json。",
     "6. 最终应尽量写出中文处置建议到 ./artifacts/<repo-name>/upgrade-plan.md。",
     "7. 如果当前模式允许修复复现或 benchmark，应优先生成教学型 PoC 到 ./artifacts/<repo-name>/poc.md，用于解释触发链路和修复前后现象；不要默认生成武器化 exploit。",
+    "8. 修复必须建立在项目入口 PoC 验证成功之上：只有 poc_evaluate 返回 verified 的问题可以进入修复；not_triggered、invalid、inconclusive 或 unsafe_blocked 只能记录为候选/未验证风险，暂时不要修改目标代码。",
     "",
     "所有面向用户的进度、摘要、风险解释和修复建议都必须使用中文。",
     "每个主要阶段完成后都要清楚报告进展。依赖版本、漏洞编号、严重性、可达性结论和修复建议必须由仓库证据或工具结果支撑，不要编造。",
