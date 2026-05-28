@@ -46,11 +46,44 @@ async function main() {
   const instance = await loadInstance(options.instanceID)
   const result = await runSecbenchSingle(instance, options)
 
-  console.log(JSON.stringify(result, null, 2))
+  console.log(JSON.stringify(toConsoleResult(result), null, 2))
   await writeGitHubSummary(result)
 
   if (result.status === "failed") {
     process.exitCode = 1
+  }
+}
+
+function toConsoleResult(result: Awaited<ReturnType<typeof runSecbenchSingle>>) {
+  const base = {
+    name: result.name,
+    status: result.status,
+    instanceID: result.instanceID,
+    taskType: result.taskType,
+    sessionID: result.sessionID,
+    workspace: result.workspace,
+    model: result.model,
+    events: result.events,
+  }
+
+  if (result.status === "failed") {
+    return {
+      ...base,
+      error: result.error,
+    }
+  }
+
+  return {
+    ...base,
+    evaluatorInputDir: result.evaluatorInputDir,
+    outputJsonl: result.outputJsonl,
+    patchPath: result.patchPath,
+    result: {
+      type: result.result.type,
+      finishReason: result.result.result.finishReason,
+      textLength: result.result.result.text.length,
+      toolCallCount: result.result.type === "requires-tool-execution" ? result.result.toolCalls.length : 0,
+    },
   }
 }
 

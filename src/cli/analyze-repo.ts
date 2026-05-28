@@ -31,11 +31,40 @@ async function main() {
   const options = parseArgs(process.argv.slice(2))
   const result = await analyzeRepo(options)
 
-  console.log(JSON.stringify(result, null, 2))
+  console.log(JSON.stringify(toConsoleResult(result), null, 2))
   await writeGitHubSummary(result)
 
   if (result.status === "failed") {
     process.exitCode = 1
+  }
+}
+
+function toConsoleResult(result: Awaited<ReturnType<typeof analyzeRepo>>) {
+  const base = {
+    name: result.name,
+    status: result.status,
+    repoUrl: result.repoUrl,
+    sessionID: result.sessionID,
+    workspace: result.workspace,
+    model: result.model,
+    events: result.events,
+  }
+
+  if (result.status === "failed") {
+    return {
+      ...base,
+      error: result.error,
+    }
+  }
+
+  return {
+    ...base,
+    result: {
+      type: result.result.type,
+      finishReason: result.result.result.finishReason,
+      textLength: result.result.result.text.length,
+      toolCallCount: result.result.type === "requires-tool-execution" ? result.result.toolCalls.length : 0,
+    },
   }
 }
 
