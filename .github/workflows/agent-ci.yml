@@ -81,6 +81,22 @@ jobs:
           nohup bun run findings:server > .agent-data/findings-server.log 2>&1 &
           echo "Findings server started on http://127.0.0.1:8787"
 
+      - name: Start findings tunnel
+        if: ${{ inputs.debug_enabled }}
+        run: |
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+          chmod +x cloudflared
+          nohup ./cloudflared tunnel --url http://127.0.0.1:8787 > .agent-data/cloudflared.log 2>&1 &
+          sleep 8
+          TUNNEL_URL="$(grep -o 'https://[^ ]*trycloudflare.com' .agent-data/cloudflared.log | head -n 1 || true)"
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "Finding Console: $TUNNEL_URL"
+            echo "### Finding Console" >> "$GITHUB_STEP_SUMMARY"
+            echo "$TUNNEL_URL" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Finding Console tunnel URL was not found yet. Check .agent-data/cloudflared.log in artifacts."
+          fi
+
       - name: Analyze repository
         run: bun run analyze "$REPO_URL"
 
