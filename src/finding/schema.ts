@@ -89,30 +89,43 @@ export const FindingDetailSchema = z.object({
 })
 export type FindingDetail = z.infer<typeof FindingDetailSchema>
 
-const FindingOpenInputSchema = z.object({
-  action: z.literal("open"),
+export const FindingCaptureInputSchema = z.object({
+  action: z.enum(["open", "append_event"]),
   stableKey: z.string().min(1),
-  title: z.string().min(1),
-  kind: FindingKindSchema,
+
+  title: z.string().min(1).optional(),
+  kind: FindingKindSchema.optional(),
   severity: FindingSeveritySchema.optional(),
   primaryIdentifier: z.string().min(1).optional(),
   packageName: z.string().min(1).optional(),
   purl: z.string().min(1).optional(),
   filePath: z.string().min(1).optional(),
-})
 
-const FindingAppendEventInputSchema = z.object({
-  action: z.literal("append_event"),
-  stableKey: z.string().min(1),
-  type: FindingEventTypeSchema.exclude(["opened"]),
-  source: FindingEventSourceSchema.default("agent"),
-  summary: z.string().min(1),
-  data: z.unknown().optional(),
+  type: FindingEventTypeSchema.exclude(["opened"]).optional(),
+  source: FindingEventSourceSchema.optional(),
+  summary: z.string().min(1).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
   artifactPath: z.string().min(1).optional(),
 })
-
-export const FindingCaptureInputSchema = z.discriminatedUnion("action", [
-  FindingOpenInputSchema,
-  FindingAppendEventInputSchema,
-])
-export type FindingCaptureInput = z.infer<typeof FindingCaptureInputSchema>
+export type FindingCaptureRawInput = z.infer<typeof FindingCaptureInputSchema>
+export type FindingCaptureInput =
+  | {
+      action: "open"
+      stableKey: string
+      title: string
+      kind: FindingKind
+      severity?: FindingSeverity
+      primaryIdentifier?: string
+      packageName?: string
+      purl?: string
+      filePath?: string
+    }
+  | {
+      action: "append_event"
+      stableKey: string
+      type: Exclude<FindingEventType, "opened">
+      source?: FindingEventSource
+      summary: string
+      data?: Record<string, unknown>
+      artifactPath?: string
+    }

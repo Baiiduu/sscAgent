@@ -159,7 +159,7 @@ export class SQLiteFindingStore {
       sessionID: context.sessionID,
       runID: context.runID,
       type: input.type,
-      source: input.source,
+      source: input.source ?? "agent",
       summary: input.summary,
       data: input.data,
       artifactPath: input.artifactPath,
