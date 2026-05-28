@@ -13,6 +13,20 @@ description: 对已确认或高优先级安全问题执行项目入口 PoC、复
 理解漏洞 -> 编写项目入口 PoC -> 调用 poc_evaluate 验证 -> 修复 -> 再次验证 -> 总结
 ```
 
+## Finding capture
+
+本阶段必须继续使用 discovery/triage 阶段已经创建的 finding，并使用一致的 stableKey。项目级输出仍然必须保留：`poc.md`、`repro-script.*`、`poc-evaluation-result.json`、`repair-summary.md`、`validation-report.md`、`patch.diff` 不可由 finding capture 替代。
+
+对每个进入修复复现闭环的 finding：
+
+1. 生成 PoC 或 repro script 后，调用 `finding_capture action=append_event` 追加 `poc_generated`。
+2. 调用 `poc_evaluate` 后，必须把工具返回的状态、oracle、entrypointEvidence、resultPath 和关键原因追加为 `poc_evaluated`。
+3. 如果无法安全生成或执行 PoC，追加 `blocked`，说明阻塞条件。
+4. 生成修复或 patch 后，追加 `fix_generated`，引用 patch artifact。
+5. 修复后验证完成后，追加 `fix_validated`，说明验证命令、结果和剩余风险。
+
+`poc_evaluated.data.status` 应直接使用 `poc_evaluate` 返回状态：`verified`、`not_triggered`、`invalid`、`inconclusive` 或 `unsafe_blocked`。不要把 agent 自己的判断写成 verified。
+
 ## 进入条件
 
 必须满足至少一项：
@@ -46,6 +60,8 @@ description: 对已确认或高优先级安全问题执行项目入口 PoC、复
 - benchmark 要求的输出格式
 
 ## PoC 要求
+
+生成 `poc.md` 或 `repro-script.*` 后，应向对应 finding 追加 `poc_generated` 事件，记录 PoC 类型、入口、触发前提、artifact 路径和是否仍缺少环境准备。
 
 本阶段必须优先生成“教学型 PoC”，帮助用户理解漏洞为什么成立，而不是生成攻击型 exploit。
 
@@ -98,6 +114,8 @@ PoC 边界：
 - 如果 PoC 可能造成破坏，应改写为解释型 PoC，并说明不能安全执行的原因。
 
 ## poc_evaluate 工具
+
+每次调用 `poc_evaluate` 后，都必须向对应 finding 追加 `poc_evaluated` 事件。事件中的 `data.status` 必须来自工具返回，`summary` 应说明 oracle 是否命中、是否通过真实项目入口触发、失败或阻塞原因。
 
 生成 PoC 或 repro script 后，必须调用 `poc_evaluate` 工具进行验证，除非存在明确阻塞原因。
 
@@ -171,6 +189,8 @@ PoC 边界：
 
 ## 修复原则
 
+生成修复或 patch 后，应向对应 finding 追加 `fix_generated` 事件，记录修改文件、修复思路和 `patch.diff` 路径。
+
 - 只修复已经通过 `poc_evaluate` 验证为 `verified` 的问题。
 - 做最小必要修改。
 - 只修改与确认问题直接相关的文件。
@@ -181,6 +201,8 @@ PoC 边界：
 - 不要使用危险参数绕过依赖冲突，例如 `--force`、`--legacy-peer-deps`，除非用户明确要求且报告中说明风险。
 
 ## 验证
+
+修复后验证完成后，应向对应 finding 追加 `fix_validated` 事件。若验证无法完成，应追加 `blocked`，说明环境、凭证、依赖或安全边界等阻塞原因。
 
 验证优先级：
 

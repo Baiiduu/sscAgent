@@ -9,6 +9,37 @@ description: 从开源项目仓库中执行上游分析，发现依赖已知漏�
 
 本阶段只负责“发现候选问题”，不负责判断最终影响、不负责修复、不负责验证。发现结果后应交给 `security-triage` 做可达性和影响判断。
 
+## Finding capture
+
+本阶段必须把项目级发现细粒度记录为单个 finding。
+
+当发现一个可独立追踪的漏洞候选时，必须调用 `finding_capture`：
+
+1. 先用 `action=open` 创建 finding。
+2. 再用 `action=append_event` 追加发现证据。
+
+依赖漏洞 stableKey 建议格式：
+
+```text
+dependency:<ecosystem>:<package-name>:<cve-ghsa-or-osv-id>
+```
+
+源码漏洞 stableKey 建议格式：
+
+```text
+source:<cwe-or-kind>:<file-or-entrypoint>:<short-name>
+```
+
+发现阶段常用事件类型：
+
+- `dependency_match`：项目依赖、版本或 PURL 命中漏洞候选。
+- `vulnerability_lookup`：OSV、GHSA、CVE 或后端查询返回的漏洞详情。
+- `source_evidence`：源码中发现潜在漏洞模式、入口、sink 或敏感路径。
+
+`summary` 必须简短说明这条事件对单个 finding 的意义。`data` 中可以放依赖版本、PURL、漏洞 ID、文件路径、入口、sink、查询来源等结构化信息。若已写出 artifact，应在 `artifactPath` 中引用对应路径。
+
+不要等最终报告才整理 findings；发现候选时就记录，后续分析阶段继续往同一个 stableKey 追加事件。
+
 ## 目标
 
 发现两类候选问题：
@@ -49,6 +80,7 @@ description: 从开源项目仓库中执行上游分析，发现依赖已知漏�
 - 无法可靠确定版本时，不要构造 PURL。
 - dev/test/build-only 依赖应标注为较低优先级，除非用户明确要求分析开发依赖。
 - 依赖漏洞查询结果应保留来源和 artifact 路径。
+- 每个可独立追踪的依赖漏洞候选都应调用 `finding_capture action=open`，并至少追加一条 `dependency_match` 事件；如果执行了 OSV/GHSA/CVE 查询，还应追加 `vulnerability_lookup` 事件。
 
 必须写出：
 
@@ -74,6 +106,8 @@ description: 从开源项目仓库中执行上游分析，发现依赖已知漏�
 - 可控输入来源
 - 可能的漏洞类型或 CWE
 - 不确定性说明
+
+每个可独立追踪的源码漏洞候选都应调用 `finding_capture action=open`，并追加 `source_evidence` 事件。若只有弱线索，也应在 `data.confidence` 或 `summary` 中说明不确定性，不要把源码候选直接当作确认漏洞。
 
 ## 输出
 

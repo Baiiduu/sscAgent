@@ -9,6 +9,24 @@ description: 对安全发现阶段产生的候选问题做可达性、影响和�
 
 本阶段负责回答“这个问题是否值得进入修复复现闭环”。它不直接修复代码，也不做完整验证。
 
+## Finding capture
+
+本阶段必须继续使用 discovery 阶段已经创建的 finding。项目级输出仍然必须保留：`triage-report.json` 和 `risk-ranking.md` 不可省略；finding capture 只是把同一分析过程按单个漏洞 case 细粒度记录。
+
+对每个进入 triage 的候选问题：
+
+1. 使用与 discovery 阶段一致的 stableKey。
+2. 调用 `finding_capture action=append_event` 追加 triage 事件。
+3. 不要用 finding capture 替代项目级 artifact。
+
+triage 阶段常用事件类型：
+
+- `reachability_analysis`：记录 direct/transitive、runtime/dev、import/require、入口、调用链、affected API、可控输入、reachable 结论等。
+- `triage_note`：记录优先级、证据缺口、不确定性、降级原因、not affected/false positive 判断。
+- `blocked`：记录因为缺少依赖、环境、源码、漏洞详情、权限或安全边界导致无法继续判断。
+
+`data.status` 可使用 `affected`、`not_affected`、`low_priority`、`under_investigation`、`false_positive`。若判断可达，建议同时设置 `data.reachable=true`。若证据不足，不要写成 affected，应记录为 `under_investigation` 或 `blocked`。
+
 ## 目标
 
 对候选问题做分流：
@@ -57,6 +75,8 @@ unknown
 
 不要仅凭 OSV 命中就判定 `affected`。
 
+对每个依赖漏洞候选，都应追加 `reachability_analysis` 或 `triage_note` 事件，说明该依赖是否处于运行时路径、项目是否实际使用、是否触达受影响 API、是否存在可控输入，以及当前是否建议进入后续复现。
+
 ## 源码漏洞影响判断
 
 对源码候选问题判断：
@@ -69,6 +89,8 @@ unknown
 - 是否存在已有测试、repro、sanitizer report 或 bug report 支持。
 
 如果证据不足，应标记为 `under_investigation`，并说明缺少哪些证据。
+
+对每个源码漏洞候选，都应追加 `reachability_analysis` 或 `triage_note` 事件，说明输入可控性、入口、调用链、过滤/权限检查、sink 和剩余不确定性。
 
 ## 输出
 

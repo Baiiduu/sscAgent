@@ -28,6 +28,8 @@ export interface CreateToolExecutorInput {
   ruleset: PermissionRuleset
   cwd: string
   workspace: string
+  sessionID?: string
+  runID?: string
   allowedExternalPaths?: string[]
   abortSignal?: AbortSignal
   onMetadata?: (input: ToolMetadataEvent) => void | Promise<void>
@@ -66,6 +68,8 @@ export function createToolExecutor(input: CreateToolExecutorInput): ToolExecutor
       const result = await tool.execute(request.input, {
         cwd: input.cwd,
         workspace: input.workspace,
+        sessionID: input.sessionID,
+        runID: input.runID,
         allowedExternalPaths: input.allowedExternalPaths ?? [],
         abortSignal: input.abortSignal ?? new AbortController().signal,
         metadata: (metadata) =>
@@ -91,6 +95,8 @@ export function createSessionToolExecutor(input: CreateSessionToolExecutorInput)
       ...input,
       cwd: session.cwd,
       workspace: session.workspace,
+      sessionID: session.id,
+      runID: events?.runID,
       allowedExternalPaths: session.allowedExternalPaths,
       snapshot: input.snapshot
         ? {

@@ -104,9 +104,6 @@ async function analyzeRepo(options: AnalyzeRepoOptions) {
           })
           console.error(`[tool-error] ${event.toolName}: ${event.error}`)
         }
-        if (event.type === "text-delta") {
-          process.stdout.write(event.text)
-        }
       },
     })
 
@@ -151,9 +148,12 @@ function createAnalysisPrompt(options: AnalyzeRepoOptions) {
     "3. 必须严格遵守下面的 GitHub Actions execution_mode 边界。",
     authorization,
     "5. 在漏洞匹配、可达性分析或修复复现前，必须确保依赖发现结果写入 ./artifacts/<repo-name>/dependency-discovery.json。",
-    "6. 最终应尽量写出中文处置建议到 ./artifacts/<repo-name>/upgrade-plan.md。",
-    "7. 如果当前模式允许修复复现或 benchmark，应优先生成教学型 PoC 到 ./artifacts/<repo-name>/poc.md，用于解释触发链路和修复前后现象；不要默认生成武器化 exploit。",
-    "8. 修复必须建立在项目入口 PoC 验证成功之上：只有 poc_evaluate 返回 verified 的问题可以进入修复；not_triggered、invalid、inconclusive 或 unsafe_blocked 只能记录为候选/未验证风险，暂时不要修改目标代码。",
+    "6. Finding capture 协议：当你发现一个可独立追踪的漏洞假设时，必须调用 finding_capture action=open 创建 finding；后续围绕该漏洞的依赖命中、漏洞详情、源码证据、可达性分析、triage 备注、PoC 生成、poc_evaluate 结果、修复和阻塞原因，都必须调用 finding_capture action=append_event 追加到同一个 stableKey。",
+    "   stableKey 必须稳定且可读。依赖漏洞建议使用 dependency:<ecosystem>:<package>:<identifier>，源码漏洞建议使用 source:<cwe-or-kind>:<file-or-entrypoint>:<short-name>。",
+    "   不要等最终报告才整理 findings；应在项目级分析过程中边发现、边记录、边补充事件。artifact 仍然照常写出，finding_capture 用于把整体分析细粒度化为单个漏洞 case。",
+    "7. 最终应尽量写出中文处置建议到 ./artifacts/<repo-name>/upgrade-plan.md。",
+    "8. 如果当前模式允许修复复现或 benchmark，应优先生成教学型 PoC 到 ./artifacts/<repo-name>/poc.md，用于解释触发链路和修复前后现象；不要默认生成武器化 exploit。",
+    "9. 修复必须建立在项目入口 PoC 验证成功之上：只有 poc_evaluate 返回 verified 的问题可以进入修复；not_triggered、invalid、inconclusive 或 unsafe_blocked 只能记录为候选/未验证风险，暂时不要修改目标代码。",
     "",
     "所有面向用户的进度、摘要、风险解释和修复建议都必须使用中文。",
     "每个主要阶段完成后都要清楚报告进展。依赖版本、漏洞编号、严重性、可达性结论和修复建议必须由仓库证据或工具结果支撑，不要编造。",

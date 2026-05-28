@@ -8,6 +8,7 @@ import {
   createWriteTool,
 } from "./builtin"
 import { createPocEvaluateTool } from "./poc-evaluate"
+import { createFindingCaptureTool } from "./finding-capture"
 import { createToolRegistry, type ToolRegistry } from "./registry"
 import type { ToolDef } from "./schema"
 import { createSkillTool } from "./skill"
@@ -33,6 +34,7 @@ export function createBuiltinTools(extra: ToolDef[] = []): ToolDef[] {
     createDependencyUpdateCheckTool(),
     createVulnerabilityLookupTool(),
     createPocEvaluateTool(),
+    createFindingCaptureTool(),
     ...extra,
   ]
 }

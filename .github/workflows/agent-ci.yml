@@ -74,6 +74,13 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Start findings server
+        if: ${{ inputs.debug_enabled }}
+        run: |
+          mkdir -p .agent-data
+          nohup bun run findings:server > .agent-data/findings-server.log 2>&1 &
+          echo "Findings server started on http://127.0.0.1:8787"
+
       - name: Analyze repository
         run: bun run analyze "$REPO_URL"
 

@@ -2,6 +2,8 @@ import type { PermissionRequest } from "../permission"
 import type { z } from "zod"
 
 export interface ToolContext {
+  sessionID?: string
+  runID?: string
   cwd: string
   workspace: string
   allowedExternalPaths: string[]

@@ -119,9 +119,6 @@ async function runSecbenchSingle(instance: SecbenchInstance, options: SecbenchSi
           })
           console.error(`[tool-error] ${event.toolName}: ${event.error}`)
         }
-        if (event.type === "text-delta") {
-          process.stdout.write(event.text)
-        }
       },
     })
 

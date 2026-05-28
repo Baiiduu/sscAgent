@@ -95,7 +95,6 @@ Actions -> Agent CI -> Run workflow
 ```text
 repo_url=https://github.com/snyk-labs/nodejs-goof.git
 execution_mode=reachability_analysis
-benchmark_name=swc-bench
 debug_enabled=false
 ```
 
@@ -110,7 +109,6 @@ debug_enabled=false
 | `upstream_analysis` | 只做上游分析：依赖识别、已知漏洞匹配、源码候选发现 |
 | `reachability_analysis` | 默认推荐：上游分析 + 可达性/影响判断 + 中文处置建议 |
 | `remediation_reproduction` | 允许生成教学型 PoC、复现、修复、验证，可能修改工作区中的目标项目文件 |
-| `benchmark` | 预留给 SWC-bench、SEC-bench 等 benchmark 任务，按任务协议运行 |
 
 建议首次使用：
 
@@ -267,6 +265,36 @@ patch.diff
 | `repair-summary.md` | 修复复现阶段的修改摘要 |
 | `validation-report.md` | 验证命令、结果和剩余风险 |
 | `patch.diff` | 修复相关 diff |
+
+## Finding Console
+
+Agent 会在项目级分析过程中，把每个可独立追踪的漏洞假设记录为 finding，并把发现、可达性分析、PoC 验证、修复和阻塞原因记录为 finding event。原有项目级报告和 artifact 仍然保留；Finding Console 只是把同一次分析按单个漏洞拆开查看。
+
+本地启动：
+
+```bash
+bun run findings:server
+```
+
+默认监听：
+
+```text
+http://127.0.0.1:8787
+```
+
+在 GitHub Actions 中，只有 `debug_enabled=true` 时才会后台启动 Finding Console。通过 tmate 连接 runner 后，可以在本地做端口转发：
+
+```bash
+ssh -L 8787:127.0.0.1:8787 <tmate ssh command>
+```
+
+然后在浏览器打开：
+
+```text
+http://127.0.0.1:8787
+```
+
+页面左侧是 finding 列表，右侧是单个 finding 的详情和事件流。当前版本是只读视图，不提供 agent 交互区。
 
 ## 本地运行
 
