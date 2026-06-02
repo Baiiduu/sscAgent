@@ -14,6 +14,8 @@ Your role is repository context construction and delegation.
 
 You are the primary agent for a two-agent GitHub Actions workflow composition flow. First understand the user's request and the target repository context. Then call the task tool with subagent_type="workflow-composer" to generate the workflow.
 
+Use the git-clone skill when a repository URL is provided. Prepare the repository under ./repos/<repo-name> and use ./artifacts/<repo-name> for all generated artifacts.
+
 Before delegating, build a concise RepoContext that covers:
 - repository language, frameworks, package managers, and build systems
 - important project structure and key files
@@ -21,7 +23,9 @@ Before delegating, build a concise RepoContext that covers:
 - available test, build, lint, coverage, dependency, and security scan signals
 - relevant secrets, permissions, or environment assumptions visible from the repository
 
-When calling workflow-composer, include both the original user request and the RepoContext. After the subagent returns, summarize the final workflow and any usage notes for the user.`
+Write the RepoContext to ./artifacts/<repo-name>/repo-context.md before delegating.
+
+When calling workflow-composer, include both the original user request and the RepoContext. Tell workflow-composer the repository path and artifact directory. After the subagent returns, summarize the final workflow and artifact paths for the user.`
 
 const WORKFLOW_COMPOSER_PROMPT = `You are the workflow-composer agent.
 
@@ -36,7 +40,11 @@ Focus on:
 - producing complete workflow YAML
 - explaining required secrets, assumptions, and usage notes
 
-Do not call other subagents. Return the workflow YAML and a concise explanation.`
+Write the final artifacts under the artifact directory provided by repo-context:
+- workflow.yml
+- workflow-notes.md
+
+Do not call other subagents. Return a concise summary that includes the artifact paths.`
 
 export function createWorkflowAgentRegistry() {
   return createAgentRegistry({
@@ -72,12 +80,8 @@ async function main() {
 
   const options = parseArgs(process.argv.slice(2))
   const runtime = createAgentRuntime()
-  const cwd = process.cwd()
-  const session = await runtime.store.create({
+  const { session, workspace } = await runtime.createSession({
     title: "Workflow composition",
-    cwd,
-    workspace: cwd,
-    directory: cwd,
   })
   const agentRegistry = createWorkflowAgentRegistry()
   const agent = agentRegistry.defaultAgent()
@@ -132,6 +136,7 @@ async function main() {
 
   const output = result.result.text.trim()
   await writeResult(output, {
+    workspace: workspace.root,
     sessionID: session.id,
     model: `${model.providerID}/${model.id}`,
   })
@@ -174,7 +179,10 @@ function createRepoContextRequest(options: WorkflowComposeOptions) {
     "User request for the repo-context agent:",
     options.request,
     "",
-    "First clone or inspect the repository, then build RepoContext, then delegate to workflow-composer.",
+    "First load and follow the git-clone skill to clone or inspect the repository.",
+    "Use ./repos/<repo-name> for the repository and ./artifacts/<repo-name> for generated artifacts.",
+    "Build RepoContext, write it to ./artifacts/<repo-name>/repo-context.md, then delegate to workflow-composer.",
+    "The workflow-composer subagent must write ./artifacts/<repo-name>/workflow.yml and ./artifacts/<repo-name>/workflow-notes.md.",
   ].join("\n")
 }
 
@@ -210,8 +218,8 @@ function createConfiguredProviderRuntime() {
   })
 }
 
-async function writeResult(output: string, metadata: { sessionID: string; model: string }) {
-  const dir = path.resolve(".agent-data/workflow-compose")
+async function writeResult(output: string, metadata: { workspace: string; sessionID: string; model: string }) {
+  const dir = path.join(metadata.workspace, "artifacts", "workflow-compose")
   await mkdir(dir, { recursive: true })
   await Bun.write(
     path.join(dir, "result.md"),
