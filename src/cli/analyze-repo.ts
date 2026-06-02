@@ -13,6 +13,7 @@ interface AnalyzeRepoOptions {
   modelID?: string
   maxIterations: number
   executionMode: AnalysisExecutionMode
+  generateIssueDrafts: boolean
 }
 
 type AnalysisExecutionMode = "upstream_analysis" | "reachability_analysis" | "remediation_reproduction" | "benchmark"
@@ -163,6 +164,7 @@ async function analyzeRepo(options: AnalyzeRepoOptions) {
 function createAnalysisPrompt(options: AnalyzeRepoOptions) {
   const mode = options.executionMode
   const authorization = authorizationPrompt(mode)
+  const issueDrafting = issueDraftingPrompt(options.generateIssueDrafts)
 
   return [
     "你正在对一个开源项目执行安全分析。",
@@ -183,9 +185,24 @@ function createAnalysisPrompt(options: AnalyzeRepoOptions) {
     "7. 最终应尽量写出中文处置建议到 ./artifacts/<repo-name>/upgrade-plan.md。",
     "8. 如果当前模式允许修复复现或 benchmark，应优先生成教学型 PoC 到 ./artifacts/<repo-name>/poc.md，用于解释触发链路和修复前后现象；不要默认生成武器化 exploit。",
     "9. 修复必须建立在项目入口 PoC 验证成功之上：只有 poc_evaluate 返回 verified 的问题可以进入修复；not_triggered、invalid、inconclusive 或 unsafe_blocked 只能记录为候选/未验证风险，暂时不要修改目标代码。",
+    issueDrafting,
     "",
     "所有面向用户的进度、摘要、风险解释和修复建议都必须使用中文。",
     "每个主要阶段完成后都要清楚报告进展。依赖版本、漏洞编号、严重性、可达性结论和修复建议必须由仓库证据或工具结果支撑，不要编造。",
+  ].join("\n")
+}
+
+function issueDraftingPrompt(enabled: boolean) {
+  if (!enabled) {
+    return "10. 当前未启用 issue draft 生成。不要生成给上游项目提交的 GitHub issue 草稿。"
+  }
+
+  return [
+    "10. 当前已启用 issue draft 生成。分析末尾必须检查是否存在 `poc_evaluate.status=verified` 的 finding。",
+    "    只允许为 verified finding 生成 GitHub issue 草稿；不要为 likely、needs_evidence、blocked、not_triggered、inconclusive、unsafe_blocked 或 not_affected finding 生成 issue。",
+    "    生成 issue 草稿前必须加载 `issue-drafting` skill，并严格遵守其中的 verified-only、可复现、自包含和不编造规则。",
+    "    每个 verified finding 应输出一个 Markdown issue draft 到 ./artifacts/<repo-name>/issue-drafts/<finding-stable-key>.md。",
+    "    issue draft 是额外产物，不替代 dependency-discovery、security-candidates、triage-report、risk-ranking、upgrade-plan、poc、validation-report 或 patch 等项目级 artifact。",
   ].join("\n")
 }
 
@@ -227,7 +244,12 @@ function parseArgs(args: string[]): AnalyzeRepoOptions {
     modelID: process.env.SMOKE_MODEL,
     maxIterations: Number(process.env.ANALYZE_MAX_ITERATIONS ?? process.env.SMOKE_MAX_ITERATIONS ?? 100),
     executionMode: parseExecutionMode(process.env.ANALYSIS_EXECUTION_MODE),
+    generateIssueDrafts: parseBoolean(process.env.ANALYSIS_GENERATE_ISSUES),
   }
+}
+
+function parseBoolean(value: string | undefined) {
+  return value === "1" || value === "true" || value === "yes" || value === "on"
 }
 
 function parseExecutionMode(value: string | undefined): AnalysisExecutionMode {

@@ -25,6 +25,10 @@ on:
         type: boolean
         default: false
         description: 'Enable debug mode for the workflow'
+      generate_issue_drafts:
+        type: boolean
+        default: false
+        description: 'Generate issue drafts for verified findings'
 
 jobs:
   typecheck:
@@ -55,6 +59,7 @@ jobs:
     env:
       REPO_URL: ${{ inputs.repo_url }}
       ANALYSIS_EXECUTION_MODE: ${{ inputs.execution_mode }}
+      ANALYSIS_GENERATE_ISSUES: ${{ inputs.generate_issue_drafts }}
       SMOKE_PROVIDER: ${{ vars.SMOKE_PROVIDER || 'deepseek' }}
       SMOKE_MODEL: ${{ vars.SMOKE_MODEL || 'deepseek-v4-flash' }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
