@@ -28,7 +28,7 @@ on:
       generate_issue_drafts:
         type: boolean
         default: false
-        description: 'Generate issue drafts for verified findings'
+        description: 'Generate disclosure-aware security report drafts for verified findings'
 
 jobs:
   typecheck:

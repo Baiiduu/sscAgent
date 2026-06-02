@@ -194,15 +194,16 @@ function createAnalysisPrompt(options: AnalyzeRepoOptions) {
 
 function issueDraftingPrompt(enabled: boolean) {
   if (!enabled) {
-    return "10. 当前未启用 issue draft 生成。不要生成给上游项目提交的 GitHub issue 草稿。"
+    return "10. 当前未启用上游安全报告草稿生成。不要生成给上游项目提交的 GitHub issue、private advisory、email 或 bug bounty 报告草稿。"
   }
 
   return [
-    "10. 当前已启用 issue draft 生成。分析末尾必须检查是否存在 `poc_evaluate.status=verified` 的 finding。",
-    "    只允许为 verified finding 生成 GitHub issue 草稿；不要为 likely、needs_evidence、blocked、not_triggered、inconclusive、unsafe_blocked 或 not_affected finding 生成 issue。",
-    "    生成 issue 草稿前必须加载 `issue-drafting` skill，并严格遵守其中的 verified-only、可复现、自包含和不编造规则。",
-    "    每个 verified finding 应输出一个 Markdown issue draft 到 ./artifacts/<repo-name>/issue-drafts/<finding-stable-key>.md。",
-    "    issue draft 是额外产物，不替代 dependency-discovery、security-candidates、triage-report、risk-ranking、upgrade-plan、poc、validation-report 或 patch 等项目级 artifact。",
+    "10. 当前已启用上游安全报告草稿生成。分析末尾必须检查是否存在真实项目链路已验证的 finding：`poc_evaluate.status=verified`，且验证必须来自目标项目真实入口、真实调用链或真实运行行为。",
+    "    生成任何上游提交草稿前必须加载 `security-report-drafting` skill，并先读取目标项目的 SECURITY.md、disclosure policy、issue template 或其他披露要求。",
+    "    只允许为真实项目链路 verified finding 生成上游安全报告草稿；不要为 dependency security update、SCA/advisory/version maintenance、likely、needs_evidence、blocked、conceptual PoC、simulated PoC、not_triggered、inconclusive、unsafe_blocked 或 not_affected finding 生成提交草稿。",
+    "    不要默认生成 GitHub public issue。必须根据目标项目披露政策选择 public issue、private GitHub advisory、email、HackerOne、bug bounty platform 或 manual-review。",
+    "    每个 eligible verified finding 应输出 report.md 和 submission-guide.md 到 ./artifacts/<repo-name>/report-drafts/<channel>/<finding-stable-key>/；被跳过的 finding 应写入 ./artifacts/<repo-name>/report-drafts/no-submit/ 并说明原因。",
+    "    security report draft 是额外产物，不替代 dependency-discovery、security-candidates、triage-report、risk-ranking、upgrade-plan、poc、validation-report 或 patch 等项目级 artifact。",
   ].join("\n")
 }
 
