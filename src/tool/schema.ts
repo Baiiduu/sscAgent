@@ -4,6 +4,9 @@ import type { z } from "zod"
 export interface ToolContext {
   sessionID?: string
   runID?: string
+  toolCallID?: string
+  messageID?: string
+  partID?: string
   cwd: string
   workspace: string
   allowedExternalPaths: string[]

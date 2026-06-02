@@ -12,6 +12,7 @@ import { createFindingCaptureTool } from "./finding-capture"
 import { createToolRegistry, type ToolRegistry } from "./registry"
 import type { ToolDef } from "./schema"
 import { createSkillTool } from "./skill"
+import { createTaskTool, type CreateTaskToolInput } from "./task"
 import {
   createDependencyUpdateCheckTool,
   createVulnerabilityLookupTool,
@@ -19,9 +20,10 @@ import {
 
 export interface CreateBuiltinToolRegistryInput {
   tools?: ToolDef[]
+  task?: CreateTaskToolInput
 }
 
-export function createBuiltinTools(extra: ToolDef[] = []): ToolDef[] {
+export function createBuiltinTools(input: CreateBuiltinToolRegistryInput = {}): ToolDef[] {
   return [
     createInvalidTool(),
     createBashTool(),
@@ -35,12 +37,13 @@ export function createBuiltinTools(extra: ToolDef[] = []): ToolDef[] {
     createVulnerabilityLookupTool(),
     createPocEvaluateTool(),
     createFindingCaptureTool(),
-    ...extra,
+    ...(input.task ? [createTaskTool(input.task)] : []),
+    ...(input.tools ?? []),
   ]
 }
 
 export function createBuiltinToolRegistry(input: CreateBuiltinToolRegistryInput = {}): ToolRegistry {
   return createToolRegistry({
-    tools: createBuiltinTools(input.tools),
+    tools: createBuiltinTools(input),
   })
 }

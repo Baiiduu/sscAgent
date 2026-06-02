@@ -25,6 +25,7 @@ export function builtinAgents(): Record<string, AgentInfo> {
       permission: mergeRules(defaults, [
         { permission: "question", pattern: "*", action: "allow" },
         { permission: "plan_enter", pattern: "*", action: "allow" },
+        { permission: "task", pattern: "*", action: "allow" },
       ]),
       mode: "primary",
       native: true,
@@ -35,6 +36,7 @@ export function builtinAgents(): Record<string, AgentInfo> {
       permission: mergeRules(defaults, [
         { permission: "question", pattern: "*", action: "allow" },
         { permission: "plan_exit", pattern: "*", action: "allow" },
+        { permission: "task", pattern: "*", action: "allow" },
         { permission: "edit", pattern: "*", action: "deny" },
       ]),
       mode: "primary",

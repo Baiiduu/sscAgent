@@ -1,0 +1,57 @@
+name: Workflow Compose
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        type: string
+        required: true
+        description: "Repository URL to compose a workflow for"
+      repo_context_request:
+        type: string
+        required: true
+        description: "Request for the repo-context agent"
+
+jobs:
+  compose:
+    name: Compose workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      REPO_URL: ${{ inputs.repo_url }}
+      REPO_CONTEXT_REQUEST: ${{ inputs.repo_context_request }}
+      SMOKE_PROVIDER: ${{ vars.SMOKE_PROVIDER || 'deepseek' }}
+      SMOKE_MODEL: ${{ vars.SMOKE_MODEL || 'deepseek-v4-flash' }}
+      WORKFLOW_COMPOSE_MAX_ITERATIONS: ${{ vars.WORKFLOW_COMPOSE_MAX_ITERATIONS || '60' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run check
+
+      - name: Run workflow compose agent
+        run: bun src/cli/workflow-compose.ts "$REPO_CONTEXT_REQUEST"
+
+      - name: Upload workflow compose data
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-compose-agent-data
+          path: ${{ github.workspace }}/.agent-data/**
+          include-hidden-files: true
+          if-no-files-found: warn

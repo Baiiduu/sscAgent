@@ -70,6 +70,9 @@ export function createToolExecutor(input: CreateToolExecutorInput): ToolExecutor
         workspace: input.workspace,
         sessionID: input.sessionID,
         runID: input.runID,
+        toolCallID: request.toolCallID,
+        messageID: request.messageID,
+        partID: request.partID,
         allowedExternalPaths: input.allowedExternalPaths ?? [],
         abortSignal: input.abortSignal ?? new AbortController().signal,
         metadata: (metadata) =>
