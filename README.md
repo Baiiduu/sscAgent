@@ -124,6 +124,37 @@ remediation_reproduction
 
 这个模式会尽量生成 `poc.md`。PoC 默认用于本地学习、解释和授权测试，不是武器化 exploit。
 
+## GitHub Actions Workflow 编排
+
+本仓库提供了一个用于生成 GitHub Actions workflow 草案的独立 workflow：
+
+```text
+Actions -> Workflow Compose -> Run workflow
+```
+
+填写：
+
+```text
+repo_url=https://github.com/example/project.git
+repo_context_request=为仓库生成包含测试、覆盖率和安全扫描的 CI workflow
+```
+
+运行结束后下载 artifact：
+
+```text
+workflow-compose-agent-data
+```
+
+重点查看：
+
+```text
+.agent-data/workspaces/sessions/<session>/artifacts/<repo-name>/repo-context.md
+.agent-data/workspaces/sessions/<session>/artifacts/<repo-name>/workflow.yml
+.agent-data/workspaces/sessions/<session>/artifacts/<repo-name>/workflow-notes.md
+```
+
+`workflow.yml` 是生成的 workflow 草案；使用前请按项目实际分支、Secret、权限和构建命令检查后再提交到目标仓库。
+
 ## SEC-bench Patch 单测
 
 本仓库提供了一个独立 workflow：

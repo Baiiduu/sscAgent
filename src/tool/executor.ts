@@ -53,10 +53,11 @@ export function createToolExecutor(input: CreateToolExecutorInput): ToolExecutor
   return {
     execute: async (request) => {
       const tool = input.registry.get(request.toolName)
+      const patterns = tool.permissionPatterns?.(request.input as never) ?? ["*"]
 
       await input.permission.ask({
         permission: request.toolName,
-        patterns: ["*"],
+        patterns,
         metadata: {
           toolCallID: request.toolCallID,
           input: request.input,

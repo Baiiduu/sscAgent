@@ -42,6 +42,7 @@ export function createTaskTool(input: CreateTaskToolInput): ToolDef<TaskToolInpu
       subagent_type: z.string().describe("The specialized subagent type to use."),
       task_id: z.string().optional().describe("Existing child session ID to resume, if continuing a previous task."),
     }),
+    permissionPatterns: (params) => [params.subagent_type],
     execute: async (params, ctx) => {
       if (!ctx.sessionID) throw new Error("task tool requires a sessionID")
 

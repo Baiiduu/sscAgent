@@ -25,6 +25,7 @@ export interface ToolDef<Input = unknown> {
   id: string
   description: string
   inputSchema: z.ZodType<Input>
+  permissionPatterns?(input: Input): string[]
   execute(input: Input, context: ToolContext): Promise<ToolResult>
 }
 
